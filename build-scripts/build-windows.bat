@@ -36,9 +36,6 @@ set "PYTHON_INSTALLED_MARKER=python\windows\.installed"
 
 if exist "%PYTHON_INSTALLED_MARKER%" (
     echo       Python runtime valid [marker found]. Skipping download/install.
-    echo.
-    echo [2/4] Installing Python modules...
-    echo       Skipping [bundled with runtime].
 ) else (
     echo       Runtime not found or incomplete. Starting fresh install...
     
@@ -79,29 +76,42 @@ if exist "%PYTHON_INSTALLED_MARKER%" (
         exit /b 1
     )
     
-    :: step 2: install python modules
-    echo [2/4] Installing Python modules...
-    echo       Installing requests, pyserial, pymavlink...
-    %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
-    if %errorlevel% neq 0 (
-        echo ERROR: Failed to install Python modules.
-        exit /b 1
-    )
-    
-    :: verify requests is available
-    %PYTHON_EXE% -c "import requests; print('requests version:', requests.__version__)"
-    if %errorlevel% neq 0 (
-        echo ERROR: Python module verification failed - requests not found.
-        exit /b 1
-    )
-    
-    echo       Optimizing Python runtime...
-    %PYTHON_EXE% scripts/optimize_python.py python/windows
-    
-    :: create marker file
+    :: create marker file after successful runtime/pip install
     echo. > "%PYTHON_INSTALLED_MARKER%"
-    echo       Python setup complete.
+    echo       Python runtime setup complete.
 )
+
+:: ensure pip is available (may be missing from older cached runtimes)
+%PYTHON_EXE% -m pip --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo       pip not found, installing...
+    powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
+    if not exist "get-pip.py" (
+        echo ERROR: Failed to download get-pip.py
+        exit /b 1
+    )
+    %PYTHON_EXE% get-pip.py --no-warn-script-location
+    del get-pip.py 2>nul
+)
+
+:: step 2: install python modules (always run to ensure modules are present)
+echo.
+echo [2/4] Installing Python modules...
+echo       Installing requests, pyserial, pymavlink...
+%PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
+if %errorlevel% neq 0 (
+    echo ERROR: Failed to install Python modules.
+    exit /b 1
+)
+
+:: verify requests is available
+%PYTHON_EXE% -c "import requests; print('requests version:', requests.__version__)"
+if %errorlevel% neq 0 (
+    echo ERROR: Python module verification failed - requests not found.
+    exit /b 1
+)
+
+echo       Module installation complete.
 echo.
 
 :: step 3: install npm dependencies
