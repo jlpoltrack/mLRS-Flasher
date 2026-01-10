@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # trigger for any tag starting with v
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            script: .\build-scripts\build-windows.bat
+            artifact_pattern: "dist/*.exe"
+          - platform: linux
+            os: ubuntu-latest
+            script: ./build-scripts/build-linux.sh
+            artifact_pattern: "dist/*.AppImage"
+          - platform: macos
+            os: macos-latest
+            script: ./build-scripts/build-mac.sh
+            artifact_pattern: "dist/*.dmg"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # using a modern version
+          cache: 'npm'
+
+      - name: Make scripts executable
+        if: runner.os != 'Windows'
+        run: chmod +x build-scripts/*.sh
+
+      - name: Run Build Script
+        run: ${{ matrix.script }}
+        # for windows we just run the .bat, for others the .sh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ matrix.artifact_pattern }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

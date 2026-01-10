@@ -13,14 +13,14 @@ function Navigation({ activeTab, onTabChange }) {
   return (
     <nav className="navigation">
       <div className="nav-header">
-        <img 
-          src={logo} 
-          alt="mLRS Logo" 
+        <img
+          src={logo}
+          alt="mLRS Logo"
           className="nav-logo"
         />
         <h1 className="nav-title">mLRS Flasher</h1>
       </div>
-      
+
       <div className="nav-tabs">
         {tabs.map(tab => (
           <button
@@ -34,9 +34,9 @@ function Navigation({ activeTab, onTabChange }) {
           </button>
         ))}
       </div>
-      
+
       <div className="nav-footer">
-        <span className="version">v1.0.0</span>
+        <span className="version">v0.1.0</span>
       </div>
     </nav>
   );
