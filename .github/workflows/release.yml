@@ -55,9 +55,11 @@ jobs:
       - name: Debug Output (Windows)
         if: matrix.platform == 'windows'
         run: |
-          echo "Current directory: $(pwd)"
-          dir dist /s
-        shell: bash # Bash on windows is fine and powerful for listing
+          echo "Checking Python configuration:"
+          cat python/windows/python*._pth
+          echo "Listing dist directory:"
+          ls -R dist
+        shell: bash
 
       - name: Upload to shelf
         uses: actions/upload-artifact@v4

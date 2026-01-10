@@ -67,9 +67,9 @@ echo [2/4] Installing Python modules...
 set PYTHON_EXE=python\windows\python.exe
 
 :: check if modules are already installed
-%PYTHON_EXE% -c "import requests; import serial; import pymavlink" >nul 2>&1
+%PYTHON_EXE% -c "import requests; import serial; import pymavlink"
 if %errorlevel% neq 0 (
-    echo       Some modules are missing, checking for pip...
+    echo       Modules not found, checking for pip...
     
     :: check if pip itself is working
     %PYTHON_EXE% -m pip --version >nul 2>&1
@@ -90,8 +90,8 @@ if %errorlevel% neq 0 (
     echo       Installing requests, pyserial, and pymavlink into project local: %cd%\python\windows
     %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
     
-    :: verify installation by trying to import them
-    %PYTHON_EXE% -c "import requests; import serial; import pymavlink" >nul 2>&1
+    :: verify installation
+    %PYTHON_EXE% -c "import requests; import serial; import pymavlink"
     if %errorlevel% neq 0 (
         echo ERROR: Failed to install Python modules. The import check failed.
         exit /b 1
