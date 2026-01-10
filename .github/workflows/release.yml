@@ -2,8 +2,13 @@ name: Release
 
 on:
   push:
+    branches:
+      - electron
     tags:
       - 'v*' # trigger for any tag starting with v
+
+permissions:
+  contents: write # required to create releases and upload assets
 
 jobs:
   build:
