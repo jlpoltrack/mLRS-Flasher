@@ -57,13 +57,26 @@ if exist "%PYTHON_INSTALLED_MARKER%" (
         exit /b 1
     )
     
-    :: check if pip needs to be installed via get-pip
-    %PYTHON_EXE% -m pip --version >nul 2>&1
+    :: install pip via get-pip (embedded python doesn't include pip)
+    echo       Installing pip...
+    powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
+    if not exist "get-pip.py" (
+        echo ERROR: Failed to download get-pip.py
+        exit /b 1
+    )
+    %PYTHON_EXE% get-pip.py --no-warn-script-location
     if %errorlevel% neq 0 (
-        echo       pip not found. Downloading get-pip.py...
-        powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
-        %PYTHON_EXE% get-pip.py --no-warn-script-location
-        if exist "get-pip.py" del get-pip.py
+        echo ERROR: Failed to install pip.
+        del get-pip.py 2>nul
+        exit /b 1
+    )
+    del get-pip.py 2>nul
+    
+    :: verify pip is now available
+    %PYTHON_EXE% -m pip --version
+    if %errorlevel% neq 0 (
+        echo ERROR: pip installation failed - pip not found after install.
+        exit /b 1
     )
     
     :: step 2: install python modules
@@ -72,6 +85,13 @@ if exist "%PYTHON_INSTALLED_MARKER%" (
     %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
     if %errorlevel% neq 0 (
         echo ERROR: Failed to install Python modules.
+        exit /b 1
+    )
+    
+    :: verify requests is available
+    %PYTHON_EXE% -c "import requests; print('requests version:', requests.__version__)"
+    if %errorlevel% neq 0 (
+        echo ERROR: Python module verification failed - requests not found.
         exit /b 1
     )
     
