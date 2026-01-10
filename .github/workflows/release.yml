@@ -20,7 +20,7 @@ jobs:
         include:
           - platform: windows
             os: windows-latest
-            script: .\build-scripts\build-windows.bat
+            script: build-scripts/build-windows.bat
             artifact_pattern: "dist/*.exe"
           - platform: linux
             os: ubuntu-latest
