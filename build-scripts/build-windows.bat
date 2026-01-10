@@ -1,7 +1,7 @@
 @echo off
 :: build-windows.bat
 :: automated windows build script for mLRS Flasher
-:: updated: 2026-01-09
+:: updated: 2026-01-10
 
 setlocal enabledelayedexpansion
 
@@ -30,73 +30,57 @@ echo Working directory: %cd%
 echo.
 
 :: step 1: download windows python runtime
-echo [1/4] Downloading Windows Python runtime...
-set PYTHON_VER=3.12.8
-if exist "python\windows\python.exe" (
-    echo       Python runtime already exists.
+echo [1/4] Checking Python runtime for Windows...
+set PYTHON_EXE=python\windows\python.exe
+set "PYTHON_INSTALLED_MARKER=python\windows\.installed"
+
+if exist "%PYTHON_INSTALLED_MARKER%" (
+    echo       Python runtime valid [marker found]. Skipping download/install.
+    echo.
+    echo [2/4] Installing Python modules...
+    echo       Skipping [bundled with runtime].
 ) else (
-    if not exist "python\windows" mkdir "python\windows"
+    echo       Runtime not found or incomplete. Starting fresh install...
     
-    echo       Downloading Python %PYTHON_VER% embeddable package...
-    powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VER%/python-%PYTHON_VER%-embed-amd64.zip' -OutFile 'python\windows\python-embed.zip'"
+    :: cleanup potential partial installs
+    if exist "python\windows" rmdir /s /q "python\windows"
+    
+    echo       Running scripts/download-python.js...
+    call node scripts/download-python.js windows
     if %errorlevel% neq 0 (
         echo ERROR: Failed to download Python runtime.
         exit /b 1
     )
     
-    echo       Extracting Python...
-    powershell -Command "Expand-Archive -Path 'python\windows\python-embed.zip' -DestinationPath 'python\windows' -Force"
-    del "python\windows\python-embed.zip"
-    
-    echo       Enabling pip support...
-    echo       Configuring Python path...
-    for %%f in (python\windows\python*._pth) do (
-        echo       Updating %%f...
-        powershell -Command "$content = 'python312.zip', '.', 'import site', 'Lib/site-packages'; $content | Set-Content -Path '%%f' -Encoding ascii"
+    if not exist "%PYTHON_EXE%" (
+        echo ERROR: Python binary not found at %PYTHON_EXE% after download step.
+        exit /b 1
     )
-)
-echo.
-
-:: step 2: install pip and python modules
-echo [2/4] Installing Python modules...
-set PYTHON_EXE=python\windows\python.exe
-
-:: check if modules are already installed
-%PYTHON_EXE% -c "import requests; import serial; import pymavlink"
-if %errorlevel% neq 0 (
-    echo       Modules not found, checking for pip...
     
-    :: check if pip itself is working
+    :: check if pip needs to be installed via get-pip
     %PYTHON_EXE% -m pip --version >nul 2>&1
     if %errorlevel% neq 0 (
-        echo       pip not found, downloading get-pip.py...
-        if not exist "get-pip.py" (
-            powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
-        )
-
-        echo       Installing pip into local runtime...
+        echo       pip not found. Downloading get-pip.py...
+        powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
         %PYTHON_EXE% get-pip.py --no-warn-script-location
-        if %errorlevel% neq 0 (
-            echo WARNING: get-pip.py reported an error, but we will try to continue.
-        )
         if exist "get-pip.py" del get-pip.py
     )
-
-    if not exist "python\windows\Lib\site-packages" mkdir "python\windows\Lib\site-packages"
-    echo       Installing modules into python\windows\Lib\site-packages...
-    %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --target python\windows\Lib\site-packages --no-warn-script-location
     
-    :: verify installation
-    %PYTHON_EXE% -c "import requests; import serial; import pymavlink"
+    :: step 2: install python modules
+    echo [2/4] Installing Python modules...
+    echo       Installing requests, pyserial, pymavlink...
+    %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
     if %errorlevel% neq 0 (
-        echo ERROR: Failed to install Python modules. The import check failed.
+        echo ERROR: Failed to install Python modules.
         exit /b 1
     )
     
     echo       Optimizing Python runtime...
     %PYTHON_EXE% scripts/optimize_python.py python/windows
-) else (
-    echo       All Python modules already installed in project local directory.
+    
+    :: create marker file
+    echo. > "%PYTHON_INSTALLED_MARKER%"
+    echo       Python setup complete.
 )
 echo.
 
