@@ -49,15 +49,10 @@ if exist "python\windows\python.exe" (
     del "python\windows\python-embed.zip"
     
     echo       Enabling pip support...
-    :: find the .pth file (e.g., python312._pth)
+    echo       Configuring Python path...
     for %%f in (python\windows\python*._pth) do (
-        echo       Configuring %%f...
-        powershell -Command "(Get-Content %%f) -replace '#import site', 'import site' | Set-Content %%f"
-        :: ensure Lib/site-packages is in the .pth file
-        findstr /C:"Lib/site-packages" %%f >nul
-        if %errorlevel% neq 0 (
-            echo Lib/site-packages >> %%f
-        )
+        echo       Updating %%f...
+        powershell -Command "$content = 'python312.zip', '.', 'import site', 'Lib/site-packages'; $content | Set-Content -Path '%%f' -Encoding ascii"
     )
 )
 echo.
@@ -87,8 +82,9 @@ if %errorlevel% neq 0 (
         if exist "get-pip.py" del get-pip.py
     )
 
-    echo       Installing requests, pyserial, and pymavlink into project local: %cd%\python\windows
-    %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --no-warn-script-location
+    if not exist "python\windows\Lib\site-packages" mkdir "python\windows\Lib\site-packages"
+    echo       Installing modules into python\windows\Lib\site-packages...
+    %PYTHON_EXE% -m pip install requests pyserial pymavlink future lxml bitstring ecdsa reedsolo cryptography --target python\windows\Lib\site-packages --no-warn-script-location
     
     :: verify installation
     %PYTHON_EXE% -c "import requests; import serial; import pymavlink"

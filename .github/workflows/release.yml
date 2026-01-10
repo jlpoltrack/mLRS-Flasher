@@ -58,7 +58,7 @@ jobs:
           echo "Checking Python configuration:"
           cat python/windows/python*._pth
           echo "Listing dist directory:"
-          ls -R dist
+          ls -R dist || echo "Dist folder not found yet."
         shell: bash
 
       - name: Upload to shelf
