@@ -62,21 +62,32 @@ export const api = {
 
       for (const file of filesToDownload) {
           outputCallback?.({ type: 'info', message: `Downloading ${file.filename}...` });
+          outputCallback?.({ type: 'info', message: `Target filename: ${file.filename}` });
           const response = await fetch(file.url);
-          const blob = await response.blob();
-          
-          // Trigger browser download
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = file.filename;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-      }
-      
+                                        const initialBlob = await response.blob();
+                                        console.log(`Blob size for ${file.filename}: ${initialBlob.size} bytes`);
+                                        
+                                        const blob = new Blob([initialBlob], { type: 'application/octet-stream' });
+                                        const url = window.URL.createObjectURL(blob);
+                                        
+                                        // Trigger browser download
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = file.filename;
+                                        a.target = '_blank'; // Helpful for some browsers
+                                        // Make it visible but invisible
+                                        a.style.position = 'absolute';
+                                        a.style.left = '-9999px';
+                                        
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        
+                                        // Delay cleanup to ensure browser captures the download
+                                        setTimeout(() => {
+                                          window.URL.revokeObjectURL(url);
+                                          document.body.removeChild(a);
+                                        }, 1000); // Increased timeout to 1s to be safe
+                                    }      
       outputCallback?.({ type: 'success', message: 'Download complete! Please check your browser downloads.' });
     } catch (err: any) {
       outputCallback?.({ type: 'error', message: `Failed to download Lua: ${err.message}` });
@@ -98,8 +109,31 @@ export const api = {
       alert('Web Serial API not supported in this browser.');
       return null;
     }
+    
+    // 1. Auto-select if a device is already authorized (e.g. from previous session)
     try {
-      selectedPort = await navigator.serial.requestPort();
+        const authorizedPorts = await navigator.serial.getPorts();
+        if (authorizedPorts.length > 0) {
+            // Pick the first available authorized port
+            selectedPort = authorizedPorts[0];
+            return formatPortName(selectedPort);
+        }
+    } catch (e) {
+        // Ignore errors checking existing ports
+    }
+
+    // 2. Request port with filters
+    try {
+      const filters = [
+        { usbVendorId: 0x0483, usbProductId: 0x5740 }, // EdgeTX/OpenTX
+        { usbVendorId: 0x0483, usbProductId: 0x374E }, // ST-Link
+        { usbVendorId: 0x1209 },                       // ArduPilot
+        { usbVendorId: 0x10C4 },                       // CP210x (Silicon Labs)
+        { usbVendorId: 0x0403 },                       // FTDI
+        { usbVendorId: 0x1A86 },                       // CH340 (WCH)
+      ];
+      
+      selectedPort = await navigator.serial.requestPort({ filters });
       return formatPortName(selectedPort);
     } catch (err) {
       return null;
@@ -146,7 +180,7 @@ export const api = {
     const { type, device, filename } = options;
     const metadata = await githubApi.getMetadata({ type, device, filename });
     const chipset = metadata.chipset || 'stm32';
-    const flashmethod = metadata.raw_flashmethod || 'stlink';
+    const flashmethod = options.flashMethod || metadata.raw_flashmethod || '';
     
     const flasherOptions: FlasherOptions = {
         chipset,
@@ -160,7 +194,8 @@ export const api = {
         filename: options.filename,
         reset: options.reset,
         baud: options.baudrate,
-        erase: options.erase
+        erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase) || undefined,
+        device: options.device
     };
 
     // Determine if we need to fetch firmware data first
@@ -222,7 +257,18 @@ function formatPortName(port: any): string {
   const info = port.getInfo();
   const vid = info.usbVendorId ? info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() : '????';
   const pid = info.usbProductId ? info.usbProductId.toString(16).padStart(4, '0').toUpperCase() : '????';
-  return `Serial Port (${vid}:${pid})`;
+  
+  let label = `Serial Port (${vid}:${pid})`;
+  
+  if (info.usbVendorId === 0x0483 && info.usbProductId === 0x5740) {
+      label += " - EdgeTX/OpenTX";
+  } else if (info.usbVendorId === 0x0483 && info.usbProductId === 0x374E) {
+      label += " - ST-Link";
+  } else if (info.usbVendorId === 0x1209) {
+      label += " - ArduPilot";
+  }
+  
+  return label;
 }
 
 function formatUSBName(device: any): string {

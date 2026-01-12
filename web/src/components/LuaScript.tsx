@@ -23,6 +23,7 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
         });
         
         const fileList = res.files || [];
+        console.log('Lua files:', fileList);
         setFiles(fileList);
         
         // default to first file or empty

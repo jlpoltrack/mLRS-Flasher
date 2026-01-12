@@ -18,6 +18,7 @@ export interface FlasherOptions {
   onLog?: (message: string) => void;
   targetType?: string; // rx, tx, txint
   filename?: string;
+  device?: string;
 }
 
 export async function flash(
@@ -30,14 +31,6 @@ export async function flash(
   onLog?.(`Starting flash process for chipset: ${chipset}...`);
 
   if (chipset === 'stm32') {
-    // For internal modules, we might need EdgeTX passthrough
-    if (options.targetType === 'txint' && port.constructor.name === 'SerialPort') {
-        onLog?.("Initializing EdgeTX Passthrough for internal module...");
-        await initEdgeTXPassthrough(port as SerialPort, options.baud || 115200, onLog);
-        // After passthrough, we may need to wait or slightly delay
-        await new Promise(r => setTimeout(r, 500));
-    }
-
     // In mLRS, 'stm32' can be DFU or UART depending on the target.
     if (port instanceof USBDevice) {
         return flashSTM32DFU(port, firmwareData, options);
@@ -51,7 +44,27 @@ export async function flash(
      
      if (options.targetType === 'txint') {
          onLog?.("Initializing EdgeTX Passthrough for internal module...");
-         await initEdgeTXPassthrough(port as SerialPort, options.baud || 115200, onLog);
+         
+         // Always disable DTR/RTS toggling for internal modules
+         options.reset = 'no_reset';
+
+         // Check for Wireless Bridge hardware or firmware
+         const isBridge = !!((options.device && options.device.toLowerCase().includes('bridge')) || 
+                          (options.filename && options.filename.toLowerCase().includes('bridge')));
+
+         onLog?.("Internal Module: Checking baud rate settings...");
+         
+         if (isBridge) {
+             onLog?.("Wireless Bridge detected: Forcing 115200 baud.");
+             options.baud = 115200;
+         } else {
+             if (!options.baud) {
+                 onLog?.("Standard Internal Module: Defaulting to 921600 baud.");
+                 options.baud = 921600;
+             }
+         }
+         
+         await initEdgeTXPassthrough(port as SerialPort, options.baud, isBridge, onLog);
          await new Promise(r => setTimeout(r, 500));
      }
 
@@ -64,6 +77,7 @@ export async function flash(
 export async function initEdgeTXPassthrough(
     port: SerialPort,
     baudrate: number,
+    isWirelessBridge: boolean = false,
     onLog?: (msg: string) => void
 ): Promise<void> {
     onLog?.("EdgeTX Passthrough: Connecting to radio...");
@@ -112,13 +126,23 @@ export async function initEdgeTXPassthrough(
 
     try {
         await executeCommand('set pulses 0', 'pulses stop');
-        await executeCommand('set rfmod 0 bootpin 1', 'boot');
+        
+        // Logic from edgetxInitPassthru.py:
+        // Skip initial bootpin assertion for wireless bridge
+        if (!isWirelessBridge) {
+            await executeCommand('set rfmod 0 bootpin 1', 'boot');
+        }
         
         onLog?.("Power cycling RF module...");
         await executeCommand('set rfmod 0 power off');
         await new Promise(r => setTimeout(r, 1000));
         await executeCommand('set rfmod 0 power on');
         await new Promise(r => setTimeout(r, 1000));
+
+        if (isWirelessBridge) {
+            onLog?.("Waiting 7s for wireless bridge configuration...");
+            await new Promise(r => setTimeout(r, 7000));
+        }
 
         await executeCommand('set rfmod 0 bootpin 1', 'boot');
         await executeCommand('set rfmod 0 bootpin 0', 'boot');
@@ -537,26 +561,62 @@ async function flashSTM32UART(
   onLog?.("Starting STM32 UART flash (AN2606)...");
   onLog?.("Ensure device is in bootloader mode (usually by holding BOOT button while powering up).");
 
-  let binaryData = firmwareData;
+  let memoryBlocks: { address: number, data: Uint8Array }[] = [];
+
   if (options.filename?.toLowerCase().endsWith('.hex')) {
-      onLog?.("Converting Intel HEX to binary...");
-      const hexText = new TextDecoder().decode(firmwareData);
+      onLog?.("Converting Intel HEX to binary blocks...");
+      const decoder = new TextDecoder();
+      const hexText = decoder.decode(firmwareData);
       
-      // Calculate offset (avoid 250MB buffers)
-      let addressOffset = 0;
-      const hexLines = hexText.split('\n');
-      for (const line of hexLines) {
-          if (line.startsWith(':02000004')) {
-              addressOffset = parseInt(line.substring(9, 13), 16) << 16;
-              break;
+      const lines = hexText.split(/\r?\n/);
+      let highAddress = 0;
+      let currentBuffer: number[] = [];
+      let startAddress = -1;
+
+      // Simple one-pass parser to build blocks
+      for (const line of lines) {
+          if (line.length === 0 || line[0] !== ':') continue;
+          
+          const byteCount = parseInt(line.substring(1, 3), 16);
+          const address = parseInt(line.substring(3, 7), 16);
+          const recordType = parseInt(line.substring(7, 9), 16);
+          const dataHex = line.substring(9, 9 + byteCount * 2);
+
+          if (recordType === 0x00) { // Data
+              const absAddress = highAddress + address;
+              
+              // If this is a new disjoint block or start of file
+              if (startAddress === -1) {
+                  startAddress = absAddress;
+              } else if (absAddress !== startAddress + currentBuffer.length) {
+                  // Push previous block
+                  if (currentBuffer.length > 0) {
+                      memoryBlocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+                  }
+                  startAddress = absAddress;
+                  currentBuffer = [];
+              }
+
+              for (let i = 0; i < byteCount; i++) {
+                  currentBuffer.push(parseInt(dataHex.substring(i * 2, i * 2 + 2), 16));
+              }
+
+          } else if (recordType === 0x01) { // EOF
+              if (currentBuffer.length > 0) {
+                  memoryBlocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+              }
+          } else if (recordType === 0x04) { // Extended Linear Address
+               const upper = parseInt(dataHex.substring(0, 4), 16);
+               highAddress = upper << 16;
           }
       }
-      onLog?.(`Using address offset: 0x${addressOffset.toString(16)}`);
       
-      const parsed = intelhex.parse(hexText, 0, addressOffset);
-      const dataBuf = (parsed.data || parsed);
-      binaryData = dataBuf.buffer ? dataBuf.buffer.slice(dataBuf.byteOffset, dataBuf.byteOffset + dataBuf.byteLength) : dataBuf;
-      onLog?.(`HEX converted: ${binaryData.byteLength} bytes`);
+      let totalBytes = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
+      onLog?.(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
+      
+  } else {
+      // Binary file - assume 0x08000000 start for STM32
+      memoryBlocks.push({ address: 0x08000000, data: new Uint8Array(firmwareData) });
   }
   
   const protocol = new Stm32UartProtocol(port, onLog);
@@ -571,21 +631,38 @@ async function flashSTM32UART(
     await protocol.eraseAll();
 
     onLog?.("Writing firmware...");
-    const data = new Uint8Array(binaryData);
-    const total = data.length;
-    let written = 0;
-    const chunkSize = 256;
+    
+    let totalSize = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
+    let totalWritten = 0;
+    let lastLogBytes = 0;
 
-    while (written < total) {
-        const remaining = total - written;
-        const currentChunkSize = Math.min(remaining, chunkSize);
-        const chunk = data.slice(written, written + currentChunkSize);
+    for (const block of memoryBlocks) {
+        onLog?.(`Writing block at 0x${block.address.toString(16)} (${block.data.length} bytes)...`);
         
-        await protocol.writeMemory(0x08000000 + written, chunk);
-        
-        written += currentChunkSize;
-        const progress = Math.round((written / total) * 100);
-        onProgress?.(progress, `Writing: ${progress}%`);
+        const data = block.data;
+        const len = data.length;
+        let written = 0;
+        const chunkSize = 256;
+
+        while (written < len) {
+            const remaining = len - written;
+            const currentChunkSize = Math.min(remaining, chunkSize);
+            const chunk = data.slice(written, written + currentChunkSize);
+            
+            await protocol.writeMemory(block.address + written, chunk);
+            
+            written += currentChunkSize;
+            totalWritten += currentChunkSize;
+            
+            const progress = Math.round((totalWritten / totalSize) * 100);
+            onProgress?.(progress, `Writing: ${progress}%`);
+
+            // Log progress every 10KB
+            if (totalWritten - lastLogBytes >= 10240) {
+                onLog?.(`Written ${Math.floor(totalWritten / 1024)} KB...`);
+                lastLogBytes = totalWritten;
+            }
+        }
     }
 
     onLog?.("STM32 UART Flash complete!");
@@ -595,6 +672,8 @@ async function flashSTM32UART(
         onLog?.("Hint: Check your connections and ensure the device is in bootloader mode.");
     }
     throw err;
+  } finally {
+    await protocol.disconnect();
   }
 }
 
@@ -604,6 +683,9 @@ class Stm32UartProtocol {
     private port: SerialPort;
     // @ts-ignore
     private onLog?: (msg: string) => void;
+    private commands: number[] = [];
+    private rxBuffer: number[] = [];
+    private readLoopActive = false;
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
         this.port = port;
@@ -611,37 +693,149 @@ class Stm32UartProtocol {
     }
 
     async connect() {
-        // STM32 bootloader uses 8E1, usually starts at 115200 or auto-bauds
-        await (this.port as any).open({ baudRate: 115200, parity: 'even' });
+        // Explicitly set 8E1 and signals to match stm-serial-flasher reference state
+        await (this.port as any).open({ baudRate: 115200, parity: 'even', stopBits: 1 });
+        
         this.reader = this.port.readable!.getReader();
         this.writer = this.port.writable!.getWriter();
 
-        // Send synchronization byte
-        await this.write(new Uint8Array([0x7F]));
-        const resp = await this.read(1, 1000);
-        if (resp[0] !== 0x79) {
-            throw new Error("Failed to sync with bootloader (no ACK)");
+        this.startReadLoop();
+
+        // Automatic bootloader entry sequence (matching stm-serial-flasher logic)
+        // Reset (DTR) is Active Low, Boot0 (RTS) is Active High
+        try {
+            this.onLog?.("Attempting automatic bootloader entry...");
+            // 1. Initial state: Boot0 High, Reset High
+            await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+            await new Promise(r => setTimeout(r, 100));
+            // 2. Assert Reset Low
+            await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+            await new Promise(r => setTimeout(r, 100));
+            // 3. Release Reset High
+            await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+            await new Promise(r => setTimeout(r, 100));
+            // 4. Deassert Boot0 Low
+            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+            await new Promise(r => setTimeout(r, 200));
+        } catch (e) {
+            // Signal control might not be supported on all platforms/adapters
         }
+
+        this.onLog?.("Flushing serial buffer...");
+        this.flush();
+
+        // Retry sync a few times
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            this.onLog?.(`[TX] Sync (0x7F) - Attempt ${attempt}...`);
+            try {
+                await this.write(new Uint8Array([0x7F]));
+                const resp = await this.read(1, 1500); // 1.5s timeout
+                
+                if (resp[0] === 0x79) {
+                    this.onLog?.("[RX] Sync ACK (0x79) - OK.");
+                    return;
+                } else if (resp[0] === 0x1F) {
+                    this.onLog?.("[RX] Sync NACK (0x1F) - Already Synced.");
+                    return;
+                } else {
+                    this.onLog?.(`[RX] Unknown 0x${resp[0].toString(16)} (trying again)`);
+                }
+            } catch (e: any) {
+                this.onLog?.(`Sync attempt ${attempt} failed: ${e.message}`);
+            }
+            
+            await new Promise(r => setTimeout(r, 200));
+        }
+        
+        throw new Error("Failed to sync with bootloader after 3 attempts. Ensure device is in bootloader mode.");
+    }
+
+    async disconnect() {
+        this.readLoopActive = false;
+        if (this.reader) {
+            try { await this.reader.cancel(); } catch(e) {}
+            this.reader.releaseLock();
+            this.reader = null;
+        }
+        if (this.writer) {
+            this.writer.releaseLock();
+            this.writer = null;
+        }
+        try { await this.port.close(); } catch(e) {}
+    }
+
+    private startReadLoop() {
+        if (this.readLoopActive) return;
+        this.readLoopActive = true;
+        (async () => {
+            try {
+                while (this.readLoopActive) {
+                    const { value, done } = await this.reader!.read();
+                    if (done) break;
+                    if (value) {
+                        const arr = Array.from(value);
+                        this.rxBuffer.push(...arr);
+                    }
+                }
+            } catch (e) {
+                // Ignore errors during close
+            } finally {
+                this.readLoopActive = false;
+            }
+        })();
+    }
+
+    private flush() {
+        this.rxBuffer = [];
     }
 
     async get() {
+        // CMD_GET = 0x00
         await this.sendCommand(0x00);
-        const len = (await this.read(1))[0];
-        const version = (await this.read(1))[0];
-        const cmds = await this.read(len);
+        
+        const lenBuf = await this.read(1);
+        const len = lenBuf[0]; // N = number of bytes to follow - 1
+        
+        // Read the rest of the payload (N + 1 bytes)
+        // This payload contains [Version, Command1, Command2, ...]
+        const payload = await this.read(len + 1);
+        
+        const version = payload[0];
+        this.commands = Array.from(payload.slice(1));
+        
         await this.waitAck();
-        return { version, cmds };
+        return { version, cmds: this.commands };
     }
 
     async eraseAll() {
-        // Extended Erase (0x44) or Global Erase (0x43)
-        // For simplicity, attempt Extended Erase special value for global
-        await this.sendCommand(0x44);
-        await this.write(new Uint8Array([0xFF, 0xFF, 0x00])); // Special 0xFFFF for global erase + checksum
-        await this.waitAck(20000); // Erase can take a long time
+        if (this.commands.length === 0) {
+            throw new Error("Execute GET command first (internal error)");
+        }
+
+        const CMD_ERASE = 0x43;
+        const CMD_EXTENDED_ERASE = 0x44;
+
+        if (this.commands.includes(CMD_EXTENDED_ERASE)) {
+            // Extended Erase (0x44)
+            // 0x44 -> ACK -> 0xFF 0xFF 0x00 (Global) -> ACK
+            await this.sendCommand(CMD_EXTENDED_ERASE);
+            // Global erase payload: 0xFFFF + checksum
+            // 0xFF 0xFF -> XOR is 0x00.
+            await this.write(new Uint8Array([0xFF, 0xFF, 0x00]));
+            await this.waitAck(30000); // Erase is slow
+        } else if (this.commands.includes(CMD_ERASE)) {
+            // Standard Erase (0x43)
+            // 0x43 -> ACK -> 0xFF (All) -> 0x00 (Checksum) -> ACK
+            await this.sendCommand(CMD_ERASE);
+            await this.write(new Uint8Array([0xFF, 0x00]));
+            await this.waitAck(30000);
+        } else {
+            throw new Error("No supported erase command found (checked 0x43, 0x44)");
+        }
     }
 
     async writeMemory(address: number, data: Uint8Array) {
+        // CMD_WRITE = 0x31
         await this.sendCommand(0x31);
         
         // Send address
@@ -650,11 +844,15 @@ class Stm32UartProtocol {
         addrBuf[1] = (address >> 16) & 0xFF;
         addrBuf[2] = (address >> 8) & 0xFF;
         addrBuf[3] = address & 0xFF;
-        addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3];
+        addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // Checksum
         await this.write(addrBuf);
-        await this.waitAck();
+        await this.waitAck(); // ACK after address
 
         // Send data
+        // N = data.length - 1
+        // Data...
+        // Checksum = N ^ data[0] ^ ... ^ data[N]
+        
         const len = data.length - 1;
         let checksum = len;
         for (const b of data) checksum ^= b;
@@ -665,7 +863,7 @@ class Stm32UartProtocol {
         dataBuf[dataBuf.length - 1] = checksum;
         
         await this.write(dataBuf);
-        await this.waitAck();
+        await this.waitAck(); // ACK after data
     }
 
     private async sendCommand(cmd: number) {
@@ -677,7 +875,7 @@ class Stm32UartProtocol {
     private async waitAck(timeout = 2000) {
         const resp = await this.read(1, timeout);
         if (resp[0] !== 0x79) {
-            throw new Error(`Expected ACK (0x79), got ${resp[0].toString(16)}`);
+            throw new Error(`Expected ACK (0x79), got 0x${resp[0].toString(16)}`);
         }
     }
 
@@ -686,26 +884,15 @@ class Stm32UartProtocol {
     }
 
     private async read(len: number, timeout = 1000): Promise<Uint8Array> {
-        const result = new Uint8Array(len);
-        let received = 0;
-
-        const timeoutId = setTimeout(() => {
-            throw new Error("Read timeout");
-        }, timeout);
-
-        try {
-            while (received < len) {
-                const { value, done } = await this.reader!.read();
-                if (done) throw new Error("Stream closed");
-                if (value) {
-                    const toCopy = Math.min(value.length, len - received);
-                    result.set(value.slice(0, toCopy), received);
-                    received += toCopy;
-                }
-            }
-        } finally {
-            clearTimeout(timeoutId);
+        const startTime = Date.now();
+        
+        while (this.rxBuffer.length < len) {
+            if (Date.now() - startTime >= timeout) throw new Error("Read timeout");
+            await new Promise(r => setTimeout(r, 10));
         }
+        
+        const result = new Uint8Array(this.rxBuffer.slice(0, len));
+        this.rxBuffer = this.rxBuffer.slice(len);
         return result;
     }
 }

@@ -114,9 +114,9 @@ export const githubApi = {
           return filename.startsWith(targetPrefix);
         })
         .map((item: any) => {
-          const filename = item.path.split('/').pop();
+          const filename = item.path.split('/').pop() || 'firmware.bin';
           const ref = 'main'; // Always use main for wireless bridge
-          const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/${item.path}`;
+          const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
 
           return {
             filename,
@@ -183,11 +183,11 @@ export const githubApi = {
           return true;
         })
         .map((item: any) => {
-          const filename = item.path.split('/').pop();
+          const filename = item.path.split('/').pop() || 'firmware.bin';
           // Use jsDelivr for raw file downloads to avoid rate limits
           const versionObj = cache['versions']?.find((v: any) => v.version === options.version);
           const ref = versionObj?.commit || 'main';
-          const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/${item.path}`;
+          const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
 
           return {
             filename,
@@ -210,6 +210,27 @@ export const githubApi = {
 
     const chipset = resolveChipset(deviceDict, targetDict, options.filename);
     
+    // Override chipset if flashing wireless bridge firmware
+    // Filename format: mlrs-wireless-bridge-<chipset>.ino.bin
+    if (options.filename.includes('mlrs-wireless-bridge-')) {
+        const match = options.filename.match(/mlrs-wireless-bridge-([a-z0-9]+)/);
+        if (match && match[1]) {
+            // override the resolved chipset (which is likely the main MCU)
+            // with the bridge chipset (e.g. esp32c3)
+            return {
+                 chipset: match[1],
+                 flashmethod: 'esptool',
+                 raw_flashmethod: 'esptool',
+                 description: 'Flashing Wireless Bridge',
+                 needsPort: true,
+                 programmer: 'esptool',
+                 hasWirelessBridge: true,
+                 isWirelessBridgeFirmware: true,
+                 wireless: targetDict.wireless
+            };
+        }
+    }
+    
     // Infer default flash method from chipset if not specified
     let defaultFlashMethod = 'stlink';
     if (chipset.includes('esp')) {
@@ -219,6 +240,7 @@ export const githubApi = {
     let flashmethod = targetDict.flashmethod || defaultFlashMethod;
     let description = targetDict.description || '';
     let wireless = targetDict.wireless;
+    let erase = targetDict.erase;
 
     // Check for nested overrides in targetDict
     for (const key in targetDict) {
@@ -228,6 +250,7 @@ export const githubApi = {
           if (subDict.flashmethod) flashmethod = subDict.flashmethod;
           if (subDict.description) description = subDict.description;
           if (subDict.wireless) wireless = subDict.wireless;
+          if (subDict.erase) erase = subDict.erase;
         }
         break;
       }
@@ -257,7 +280,8 @@ export const githubApi = {
       needsPort,
       programmer,
       hasWirelessBridge: !!wireless,
-      wireless
+      wireless,
+      erase
     };
   }
 };
