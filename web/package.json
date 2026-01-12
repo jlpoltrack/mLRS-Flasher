@@ -34,6 +34,11 @@
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vite-plugin-node-polyfills": "^0.24.0"
+  },
+  "overrides": {
+    "xml2js": "^0.6.2",
+    "elliptic": "^6.6.1"
   }
 }

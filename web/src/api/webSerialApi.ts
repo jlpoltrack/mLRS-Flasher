@@ -110,19 +110,7 @@ export const api = {
       return null;
     }
     
-    // 1. Auto-select if a device is already authorized (e.g. from previous session)
-    try {
-        const authorizedPorts = await navigator.serial.getPorts();
-        if (authorizedPorts.length > 0) {
-            // Pick the first available authorized port
-            selectedPort = authorizedPorts[0];
-            return formatPortName(selectedPort);
-        }
-    } catch (e) {
-        // Ignore errors checking existing ports
-    }
-
-    // 2. Request port with filters
+    // Request port with filters
     try {
       const filters = [
         { usbVendorId: 0x0483, usbProductId: 0x5740 }, // EdgeTX/OpenTX
@@ -171,6 +159,7 @@ export const api = {
     type: string,
     device: string,
     flashMethod?: string,
+    passthroughSerial?: string,
     baudrate?: number,
     target?: string,
     reset?: string,
@@ -195,7 +184,9 @@ export const api = {
         reset: options.reset,
         baud: options.baudrate,
         erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase) || undefined,
-        device: options.device
+        device: options.device,
+        flashMethod: options.flashMethod,
+        passthroughSerial: options.passthroughSerial
     };
 
     // Determine if we need to fetch firmware data first

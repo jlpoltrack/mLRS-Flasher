@@ -3,6 +3,7 @@ import { DFU, DFUse } from 'webdfu';
 // @ts-ignore
 import intelhex from 'intel-hex';
 import { Buffer } from 'buffer';
+import { initApPassthrough } from './apPassthru';
 
 // Shim Buffer for libraries that expect it (like intel-hex)
 if (typeof window !== 'undefined' && !(window as any).Buffer) {
@@ -19,6 +20,8 @@ export interface FlasherOptions {
   targetType?: string; // rx, tx, txint
   filename?: string;
   device?: string;
+  flashMethod?: string;
+  passthroughSerial?: string;
 }
 
 export async function flash(
@@ -26,7 +29,7 @@ export async function flash(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { chipset, onLog } = options;
+  const { chipset, onLog, flashMethod } = options;
 
   onLog?.(`Starting flash process for chipset: ${chipset}...`);
 
@@ -35,7 +38,22 @@ export async function flash(
     if (port instanceof USBDevice) {
         return flashSTM32DFU(port, firmwareData, options);
     } else {
-        return flashSTM32UART(port, firmwareData, options);
+        if (flashMethod === 'appassthru') {
+            if (!options.passthroughSerial) {
+                throw new Error("Passthrough Serial port not specified for AP Passthrough");
+            }
+            
+            const isEsp = chipset.startsWith('esp');
+            const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, isEsp, onLog);
+            port = result.port;
+            
+            // For STM32, if we didn't force 115200, we might need to tell the flasher to use the detected baud
+            if (!isEsp) {
+                options.baud = result.baudRate;
+                onLog?.(`STM32 Passthrough: Using FC baud rate ${options.baud}`);
+            }
+        }
+        return flashSTM32UART(port as SerialPort, firmwareData, options);
     }
   } else if (chipset.startsWith('esp')) {
      if (port.constructor.name !== 'SerialPort') {
@@ -66,6 +84,16 @@ export async function flash(
          
          await initEdgeTXPassthrough(port as SerialPort, options.baud, isBridge, onLog);
          await new Promise(r => setTimeout(r, 500));
+     }
+
+     // Handle AP Passthru for ESP
+     if (flashMethod === 'appassthru') {
+        if (!options.passthroughSerial) {
+            throw new Error("Passthrough Serial port not specified for AP Passthrough");
+        }
+        const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
+        port = result.port;
+        // ESP always forced to 115200 by initApPassthrough logic
      }
 
      return flashESP(port as SerialPort, firmwareData, options);
@@ -180,17 +208,18 @@ async function flashESP(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { baud = 921600, erase, onProgress, onLog, filename, reset } = options;
+  const { baud = 921600, erase, onProgress, onLog, filename, reset, flashMethod } = options;
 
   onLog?.("Connecting to ESP device...");
   
   const transport = new Transport(port);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices (e.g. Bandit Wireless Bridge)
-  if (reset && (reset.includes('no dtr') || reset.includes('no_reset'))) {
-      onLog?.("Mode: Manual Bootloader (No DTR/RTS toggle)");
-      transport.setDTR = async () => {};
-      transport.setRTS = async () => {};
+  // Also disable for AP Passthru as signals don't pass through FC
+  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
+      onLog?.("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
+      transport.setDTR = async () => { await port.setSignals({ dataTerminalReady: false }); };
+      transport.setRTS = async () => { await port.setSignals({ requestToSend: false }); };
   }
   
   const esploader = new ESPLoader({
@@ -559,7 +588,6 @@ async function flashSTM32UART(
 ): Promise<void> {
   const { onProgress, onLog } = options;
   onLog?.("Starting STM32 UART flash (AN2606)...");
-  onLog?.("Ensure device is in bootloader mode (usually by holding BOOT button while powering up).");
 
   let memoryBlocks: { address: number, data: Uint8Array }[] = [];
 
@@ -627,8 +655,57 @@ async function flashSTM32UART(
     const info = await protocol.get();
     onLog?.(`Bootloader version: ${info.version.toString(16)}`);
 
-    onLog?.("Erasing flash...");
-    await protocol.eraseAll();
+    const chipId = await protocol.getId();
+    onLog?.(`Chip ID: 0x${chipId.toString(16)}`);
+
+    // Determine page size and erase necessary pages
+    const CHIP_PAGE_SIZES: Record<number, number> = {
+        0x410: 1024,  // STM32F1 Medium Density
+        0x414: 2048,  // STM32F1 High Density
+        0x415: 2048,  // STM32L433/L443
+        0x435: 2048,  // STM32G431/G441 (Category 2)
+        0x462: 2048,  // STM32L45x/46x
+        0x413: 2048,  // STM32F4
+        0x419: 2048,  // STM32F4
+        0x497: 2048,  // STM32WLE5 (LoRa SOC)
+    };
+
+    const pageSize = CHIP_PAGE_SIZES[chipId] || 2048; // Default to 2KB if unknown
+    if (!CHIP_PAGE_SIZES[chipId]) {
+        onLog?.(`Warning: Unknown Chip ID 0x${chipId.toString(16)}. Assuming 2KB page size.`);
+    } else {
+        onLog?.(`Detected Page Size: ${pageSize} bytes`);
+    }
+
+    onLog?.("Calculating pages to erase...");
+    
+    // Calculate unique pages
+    const pagesToErase = new Set<number>();
+    // Flash base address is usually 0x08000000
+    const FLASH_BASE = 0x08000000;
+
+    for (const block of memoryBlocks) {
+        let addr = block.address;
+        const end = block.address + block.data.length;
+        
+        // Only erase if in Flash range (standard STM32 flash starts at 0x08000000)
+        if (addr >= FLASH_BASE && addr < FLASH_BASE + 0x200000) { // Check up to 2MB
+             while (addr < end) {
+                 const pageIndex = Math.floor((addr - FLASH_BASE) / pageSize);
+                 pagesToErase.add(pageIndex);
+                 // Jump to the exact start of the next page
+                 addr = FLASH_BASE + (pageIndex + 1) * pageSize;
+             }
+        }
+    }
+    
+    const sortedPages = Array.from(pagesToErase).sort((a, b) => a - b);
+    if (sortedPages.length === 0) {
+        onLog?.("Warning: No flash pages found to erase (maybe writing to RAM?). Skipping erase.");
+    } else {
+        onLog?.(`Erasing ${sortedPages.length} pages: ${sortedPages.join(', ')}...`);
+        await protocol.erasePages(sortedPages);
+    }
 
     onLog?.("Writing firmware...");
     
@@ -805,6 +882,104 @@ class Stm32UartProtocol {
         
         await this.waitAck();
         return { version, cmds: this.commands };
+    }
+
+    async getId(): Promise<number> {
+        // CMD_GET_ID = 0x02
+        await this.sendCommand(0x02);
+        
+        const lenBuf = await this.read(1);
+        const len = lenBuf[0]; // N = number of bytes to follow - 1
+        
+        // Payload: [PID] (usually 1 byte? No, ID is usually 2 bytes? or just PID?)
+        // AN3155: Byte 1 = N (number of bytes - 1). 
+        // Then N+1 bytes. 
+        // Example: 0x01 (len=1) -> 0x04 0x10 (ID=0x410)
+        
+        const payload = await this.read(len + 1);
+        await this.waitAck();
+        
+        if (payload.length >= 2) {
+             return (payload[0] << 8) | payload[1];
+        } else if (payload.length === 1) {
+             return payload[0];
+        }
+        return 0;
+    }
+
+    async erasePages(pages: number[]) {
+        if (this.commands.length === 0) {
+            throw new Error("Execute GET command first (internal error)");
+        }
+
+        const CMD_ERASE = 0x43;
+        const CMD_EXTENDED_ERASE = 0x44;
+        const USE_EXTENDED = this.commands.includes(CMD_EXTENDED_ERASE);
+        
+        if (!USE_EXTENDED && !this.commands.includes(CMD_ERASE)) {
+            throw new Error("No supported erase command found");
+        }
+
+        // Use Extended Erase (0x44) if available as it supports 2-byte page codes
+        // Standard Erase (0x43) supports 1-byte page codes (0-255).
+        // If we have pages > 255, we must use 0x44.
+
+        // Chunk pages to avoid packet size limits (max 255 bytes payload)
+        // Each page is 2 bytes in Extended (plus 2 bytes count).
+        // Max pages per command ~125.
+        
+        const CHUNK_SIZE = USE_EXTENDED ? 60 : 250; // Safe limits
+
+        for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
+            const chunk = pages.slice(i, i + CHUNK_SIZE);
+            const N = chunk.length;
+            
+            if (USE_EXTENDED) {
+                await this.sendCommand(CMD_EXTENDED_ERASE);
+                
+                // Payload: [N-1 (2 bytes)] [Page0 (2 bytes)] ... [Checksum]
+                // N-1 is 2 bytes, MSB first.
+                const count = N - 1;
+                const data = new Uint8Array(2 + N * 2 + 1);
+                data[0] = (count >> 8) & 0xFF;
+                data[1] = count & 0xFF;
+                
+                let checksum = data[0] ^ data[1];
+                
+                for (let j = 0; j < N; j++) {
+                    const page = chunk[j];
+                    const msb = (page >> 8) & 0xFF;
+                    const lsb = page & 0xFF;
+                    data[2 + j*2] = msb;
+                    data[2 + j*2 + 1] = lsb;
+                    checksum ^= msb ^ lsb;
+                }
+                
+                data[data.length - 1] = checksum;
+                await this.write(data);
+                
+            } else {
+                // Standard Erase 0x43 (0xFF is not used here)
+                // Payload: [N-1 (1 byte)] [Page0 (1 byte)] ... [Checksum]
+                await this.sendCommand(CMD_ERASE);
+                
+                const count = N - 1;
+                const data = new Uint8Array(1 + N + 1);
+                data[0] = count;
+                let checksum = count;
+                
+                for (let j = 0; j < N; j++) {
+                    const page = chunk[j];
+                    if (page > 255) throw new Error(`Page ${page} too high for standard erase`);
+                    data[1 + j] = page;
+                    checksum ^= page;
+                }
+                data[data.length - 1] = checksum;
+                await this.write(data);
+            }
+            
+            await this.waitAck(5000 + N * 50); // Give time for erase
+        }
     }
 
     async eraseAll() {

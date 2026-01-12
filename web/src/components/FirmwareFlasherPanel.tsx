@@ -153,6 +153,7 @@ function FirmwareFlasherPanel({
       device: selectedDevice,
       version: selectedVersion,
       flashMethod: flashMethod,
+      passthroughSerial: (flashMethod === 'appassthru') ? serialX : undefined,
       url: file.url,
       filename: file.filename,
       port: selectedPort || undefined,
