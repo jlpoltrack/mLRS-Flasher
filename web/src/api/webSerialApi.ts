@@ -22,6 +22,9 @@ export const api = {
   getMetadata: async (options: { type: string, device: string, filename: string }) => {
     return githubApi.getMetadata(options);
   },
+  listWirelessBridgeFirmware: async (options: { version: string, chipset: string }) => {
+    return githubApi.listWirelessBridgeFirmware(options);
+  },
 
   // Stub for update check (Phase 2 polish)
   checkForUpdates: async () => {
@@ -131,11 +134,14 @@ export const api = {
     port?: string,
     usbDeviceName?: string,
     firmwareData?: ArrayBuffer,
-    type: string, // Added type
-    device: string, // Added device
-    flashMethod?: string, // Added flashMethod
-    baudrate?: number, // Added baudrate
-    target?: string // Added target
+    type: string,
+    device: string,
+    flashMethod?: string,
+    baudrate?: number,
+    target?: string,
+    reset?: string,
+    url?: string,
+    erase?: string // Added erase
   }): Promise<void> => { 
     const { type, device, filename } = options;
     const metadata = await githubApi.getMetadata({ type, device, filename });
@@ -151,30 +157,41 @@ export const api = {
         onLog: (message) => {
             outputCallback?.({ type: 'log', message });
         },
-        filename: options.filename
+        filename: options.filename,
+        reset: options.reset,
+        baud: options.baudrate,
+        erase: options.erase
     };
 
     // Determine if we need to fetch firmware data first
     let data = options.firmwareData;
     if (!data) {
-        // Fetch from GitHub
-        const { version } = options;
-        const { onLog } = flasherOptions;
-        
-        onLog?.(`Searching for firmware ${filename} for ${device} (${version})...`);
-        const firmwareFiles = await githubApi.listFirmware({ type, device, version });
-        
-        onLog?.(`Found ${firmwareFiles.files.length} candidate files.`);
-        const file = firmwareFiles.files.find(f => f.filename === filename);
-        
-        if (!file) {
-            console.log('Available files:', firmwareFiles.files.map(f => f.filename));
-            throw new Error(`Firmware file not found: ${filename}`);
+        // Use provided URL if available (e.g. for wireless bridge)
+        if (options.url) {
+             const { onLog } = flasherOptions;
+             onLog?.(`Downloading firmware from ${options.url}...`);
+             const response = await fetch(options.url);
+             data = await response.arrayBuffer();
+        } else {
+             // Fetch from GitHub via lookup
+             const { version } = options;
+             const { onLog } = flasherOptions;
+             
+             onLog?.(`Searching for firmware ${filename} for ${device} (${version})...`);
+             const firmwareFiles = await githubApi.listFirmware({ type, device, version });
+             
+             onLog?.(`Found ${firmwareFiles.files.length} candidate files.`);
+             const file = firmwareFiles.files.find(f => f.filename === filename);
+             
+             if (!file) {
+                 console.log('Available files:', firmwareFiles.files.map(f => f.filename));
+                 throw new Error(`Firmware file not found: ${filename}`);
+             }
+             
+             onLog?.(`Downloading firmware from ${file.url}...`);
+             const response = await fetch(file.url);
+             data = await response.arrayBuffer();
         }
-        
-        onLog?.(`Downloading firmware from ${file.url}...`);
-        const response = await fetch(file.url);
-        data = await response.arrayBuffer();
     }
 
     if (chipset === 'stm32' && flashmethod === 'dfu') {

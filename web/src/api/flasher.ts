@@ -136,16 +136,39 @@ export async function initEdgeTXPassthrough(
     }
 }
 
+const fetchBinary = async (path: string): Promise<string> => {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Failed to fetch ${path}`);
+    const buffer = await response.arrayBuffer();
+    // SAFE CONVERSION: Avoid TextDecoder('iso-8859-1') as it acts like windows-1252 
+    // and corrupts bytes 0x80-0x9F.
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+};
+
 async function flashESP(
   port: SerialPort,
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { baud = 460800, erase, onProgress, onLog } = options;
+  const { baud = 921600, erase, onProgress, onLog, filename, reset } = options;
 
   onLog?.("Connecting to ESP device...");
   
   const transport = new Transport(port);
+
+  // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices (e.g. Bandit Wireless Bridge)
+  if (reset && (reset.includes('no dtr') || reset.includes('no_reset'))) {
+      onLog?.("Mode: Manual Bootloader (No DTR/RTS toggle)");
+      transport.setDTR = async () => {};
+      transport.setRTS = async () => {};
+  }
+  
   const esploader = new ESPLoader({
     transport: transport,
     baudrate: baud,
@@ -158,27 +181,106 @@ async function flashESP(
   });
 
   try {
-    const chip = await esploader.main();
-    onLog?.(`Detected chip: ${chip}`);
+    const chipName = await esploader.main();
+    onLog?.(`Detected chip: ${chipName}`);
 
     if (erase === 'full_erase') {
         onLog?.("Performing full erase...");
         await esploader.eraseFlash();
     }
 
-    // esptool-js 0.5.x expects a specific format. Cast to any to avoid type mismatches
-    // if the library types are slightly off.
-    const fileArray = [{
-        data: new Uint8Array(firmwareData) as any,
-        address: 0x0,
-    }];
+    onLog?.("Preparing firmware files...");
+    // SAFE CONVERSION: Manual loop to preserve 0x80-0x9F
+    let firmwareStr = "";
+    const firmwareBytes = new Uint8Array(firmwareData);
+    const fwLen = firmwareBytes.byteLength;
+    for (let i = 0; i < fwLen; i++) {
+        firmwareStr += String.fromCharCode(firmwareBytes[i]);
+    }
+    
+    // Default to single file at 0x0
+    let fileArray = [
+        { data: firmwareStr, address: 0x0 }
+    ];
+    let flashSize = '4MB';
+    let flashMode = 'dio';
+    let flashFreq = '40m';
+
+    const cleanChip = chipName.replace(/-/g, '').toLowerCase(); // e.g. esp32s3, esp32c3, esp32
+
+    if (cleanChip.includes('esp32')) {
+        let bootloaderPath = '';
+        let partitionsPath = '';
+        let bootAppPath = '';
+        let bootloaderOffset = 0x1000;
+        const firmwareOffset = 0x10000;
+
+        if (cleanChip.includes('esp32c3')) {
+            bootloaderPath = '/assets/esp32c3/bootloader.bin';
+            partitionsPath = '/assets/esp32c3/partitions.bin';
+            bootAppPath = '/assets/esp32c3/boot_app0.bin';
+            bootloaderOffset = 0x0000;
+            flashSize = '4MB';
+        } else if (cleanChip.includes('esp32s3')) {
+            bootloaderPath = '/assets/esp32s3/bootloader.bin';
+            partitionsPath = '/assets/esp32s3/partitions.bin';
+            bootAppPath = '/assets/esp32s3/boot_app0.bin';
+            bootloaderOffset = 0x0000;
+            flashSize = '8MB';
+        } else {
+            // Standard ESP32
+            partitionsPath = '/assets/esp32/partitions.bin';
+            bootAppPath = '/assets/esp32/boot_app0.bin';
+            bootloaderOffset = 0x1000;
+            flashSize = '4MB';
+            
+            // Determine bootloader 40dio vs 80qio
+            let bootloaderFile = 'bootloader_40dio.bin';
+            if (filename) {
+                const match = filename.match(/v(\d+)\.(\d+)\.(\d+)/);
+                if (match) {
+                    const [_, major, minor, patch] = match.map(Number);
+                    // >= 1.3.7 uses 80qio
+                    if (major > 1 || (major === 1 && minor > 3) || (major === 1 && minor === 3 && patch >= 7)) {
+                        bootloaderFile = 'bootloader_80qio.bin';
+                    }
+                }
+            }
+            bootloaderPath = `/assets/esp32/${bootloaderFile}`;
+        }
+
+        onLog?.(`Downloading auxiliary files for ${cleanChip}...`);
+        const bootloader = await fetchBinary(bootloaderPath);
+        const partitions = await fetchBinary(partitionsPath);
+        const bootApp = await fetchBinary(bootAppPath);
+
+        fileArray = [
+            { data: bootloader, address: bootloaderOffset },
+            { data: partitions, address: 0x8000 },
+            { data: bootApp, address: 0xe000 },
+            { data: firmwareStr, address: firmwareOffset }
+        ];
+    } else if (cleanChip.includes('esp8266') || cleanChip.includes('esp8285')) {
+         fileArray = [{ data: firmwareStr, address: 0x0 }];
+    }
 
     onLog?.("Writing flash...");
-    await esploader.writeFlash({
+    const flashOptions = {
         fileArray,
-        flashSize: 'keep',
-        flashMode: 'keep',
-        flashFreq: 'keep',
+        flashSize,
+        flashMode,
+        flashFreq,
+        eraseAll: false,
+        compress: true,
+    };
+    
+    onLog?.(`Flash Params: Mode=${flashOptions.flashMode}, Freq=${flashOptions.flashFreq}, Size=${flashOptions.flashSize}, Compress=${flashOptions.compress}`);
+    for (const file of fileArray) {
+        onLog?.(`Writing ${file.data.length} bytes to 0x${file.address.toString(16)}`);
+    }
+
+    await esploader.writeFlash({
+        ...flashOptions,
         calculateMD5Hash: (_data: any) => "",
         reportProgress: (_fileIndex: number, written: number, total: number) => {
             const progress = Math.round((written / total) * 100);
@@ -187,6 +289,16 @@ async function flashESP(
     } as any);
 
     onLog?.("Flash complete!");
+    onLog?.("Resetting device...");
+    
+    // Manual Reset Sequence:
+    // RTS (EN) low = Reset active
+    // DTR (IO0) high = Boot mode (keep high to ensure it doesn't go to bootloader)
+    await transport.setDTR(false); // DTR low = IO0 high (pull-up)
+    await transport.setRTS(true);  // RTS high = EN low (reset)
+    await new Promise(r => setTimeout(r, 100));
+    await transport.setRTS(false); // RTS low = EN high (run)
+    
     await transport.disconnect();
   } catch (err: any) {
     onLog?.(`Error during ESP flash: ${err.message}`);

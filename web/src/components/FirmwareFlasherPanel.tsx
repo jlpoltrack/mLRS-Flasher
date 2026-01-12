@@ -47,6 +47,13 @@ function FirmwareFlasherPanel({
     setError,
   } = useFirmwareLoader(targetType, selectedDevice, selectedVersion);
 
+  useEffect(() => {
+    console.log('FLASH DEBUG: Metadata Updated', metadata);
+    if (metadata) {
+       console.log('FLASH DEBUG: raw_flashmethod:', metadata.raw_flashmethod);
+    }
+  }, [metadata]);
+
   const {
     ports,
     selectedPort,
@@ -56,6 +63,7 @@ function FirmwareFlasherPanel({
   } = useSerialPorts(isFlashing);
 
   const {
+    usbDevices, // Destructured
     selectedUSBDevice,
     isScanningUSB,
     refreshUSBDevices,
@@ -69,14 +77,35 @@ function FirmwareFlasherPanel({
   useEffect(() => {
     if (metadata?.raw_flashmethod) {
       const methods = metadata.raw_flashmethod.split(',');
-      // priorities: stlink, uart, dfu, appassthru
-      // this order preference can be tweaked if needed
-      if (methods.includes('stlink')) setFlashMethod('stlink');
-      else if (methods.includes('uart')) setFlashMethod('uart');
-      else if (methods.includes('dfu')) setFlashMethod('dfu');
-      else if (methods.includes('appassthru')) setFlashMethod('appassthru');
-      else setFlashMethod(methods[0]);
+      console.log('FLASH DEBUG: Available methods:', methods);
+      // priorities: esptool, uart, stlink, dfu, appassthru
+      // FIX: Prioritize esptool/uart so ESP devices don't mistakenly fall into stlink mode
+      if (methods.includes('esptool')) {
+          console.log('FLASH DEBUG: Selected esptool');
+          setFlashMethod('esptool');
+      }
+      else if (methods.includes('uart')) {
+          console.log('FLASH DEBUG: Selected uart');
+          setFlashMethod('uart');
+      }
+      else if (methods.includes('stlink')) {
+          console.log('FLASH DEBUG: Selected stlink');
+          setFlashMethod('stlink');
+      }
+      else if (methods.includes('dfu')) {
+          console.log('FLASH DEBUG: Selected dfu');
+          setFlashMethod('dfu');
+      }
+      else if (methods.includes('appassthru')) {
+          console.log('FLASH DEBUG: Selected appassthru');
+          setFlashMethod('appassthru');
+      }
+      else {
+          console.log('FLASH DEBUG: Selected first available:', methods[0]);
+          setFlashMethod(methods[0]);
+      }
     } else {
+      console.log('FLASH DEBUG: No raw_flashmethod found');
       setFlashMethod('default');
     }
   }, [metadata]);
@@ -133,21 +162,43 @@ function FirmwareFlasherPanel({
     });
   }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, serialX, setError, onFlash, targetType]);
 
-  const handleFlashWirelessBridge = useCallback(() => {
-    const file = firmwareFiles.find(f => f.filename === selectedFile);
-    if (!file) return;
+  const handleFlashWirelessBridge = useCallback(async () => {
+    if (!metadata?.wireless?.chipset) {
+        setError("Wireless bridge chipset not defined in metadata.");
+        return;
+    }
 
-    onFlash({
-      type: targetType,
-      programmer: 'esp wirelessbridge',
-      device: selectedDevice,
-      version: selectedVersion,
-      url: file.url,
-      filename: file.filename,
-      port: selectedPort || undefined,
-      target: 'wireless_bridge',
-    });
-  }, [firmwareFiles, selectedFile, selectedDevice, selectedVersion, selectedPort, onFlash, targetType]);
+    try {
+        const files = await api.listWirelessBridgeFirmware({
+            version: selectedVersion,
+            chipset: metadata.wireless.chipset
+        });
+        
+        if (files.length === 0) {
+            setError(`No wireless bridge firmware found for chipset ${metadata.wireless.chipset}`);
+            return;
+        }
+
+        const file = files[0]; // Use first match
+
+        onFlash({
+          type: targetType,
+          programmer: 'esp wirelessbridge',
+          device: selectedDevice,
+          version: selectedVersion,
+          url: file.url,
+          filename: file.filename,
+          port: selectedPort || undefined,
+          target: 'wireless_bridge',
+          reset: metadata.wireless.reset,
+          baudrate: metadata.wireless.baud,
+          erase: metadata.wireless.erase
+        });
+    } catch (e) {
+        console.error(e);
+        setError("Failed to locate wireless bridge firmware.");
+    }
+  }, [metadata, selectedVersion, selectedDevice, selectedPort, onFlash, targetType, setError]);
 
   const isDevVersion = selectedVersion?.includes('dev');
 
@@ -287,30 +338,58 @@ function FirmwareFlasherPanel({
           <div className="form-group port-group full-width">
             <label>COM Port</label>
             <div className="port-row">
-              <div className="select-wrapper">
-                <select 
-                  value={selectedPort} 
-                  onChange={(e) => setSelectedPort(e.target.value)}
-                  disabled={isFlashing || isScanningPorts}
-                >
-                  {isScanningPorts ? (
-                    <option>Scanning...</option>
-                  ) : ports.length === 0 ? (
-                    <option>No ports found</option>
-                  ) : (
-                    ports.map(port => (
-                      <option key={port} value={port}>{port}</option>
-                    ))
-                  )}
-                </select>
-              </div>
-              <button 
-                className="btn-success" 
-                onClick={() => refreshPorts({ request: true })}
-                disabled={isFlashing || isScanningPorts}
-              >
-                {isScanningPorts ? 'Scanning...' : 'Add Device'}
-              </button>
+              {selectedPort ? (
+                <>
+                  <div className="static-display">
+                    {selectedPort}
+                  </div>
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => {
+                        // If we want to allow switching to another existing port, we effectively
+                        // need to clear the selection or re-scan.
+                        // For DFU match, we just trigger refresh.
+                        // We also clear selection so they can see the dropdown if they cancel?
+                        // Actually, 'refreshPorts' with request:true opens the picker.
+                        // Let's just do that to match DFU.
+                        refreshPorts({ request: true });
+                    }}
+                    disabled={isFlashing || isScanningPorts}
+                  >
+                    Change Device
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="select-wrapper">
+                    <select 
+                      value={selectedPort} 
+                      onChange={(e) => {
+                        setSelectedPort(e.target.value);
+                        setError(null);
+                      }}
+                      disabled={isFlashing || isScanningPorts}
+                    >
+                      {isScanningPorts ? (
+                        <option>Scanning...</option>
+                      ) : ports.length === 0 ? (
+                        <option>No ports found</option>
+                      ) : (
+                        ports.map(port => (
+                          <option key={port} value={port}>{port}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <button 
+                    className="btn-success" 
+                    onClick={() => refreshPorts({ request: true })}
+                    disabled={isFlashing || isScanningPorts}
+                  >
+                    {isScanningPorts ? 'Scanning...' : 'Add Device'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -334,14 +413,41 @@ function FirmwareFlasherPanel({
                   </button>
                 </>
               ) : (
-                <button 
-                  className="btn-success" 
-                  style={{ width: '100%' }}
-                  onClick={() => refreshUSBDevices({ request: true })}
-                  disabled={isFlashing || isScanningUSB}
-                >
-                  {isScanningUSB ? 'Connecting...' : 'Add USB Device (DFU)'}
-                </button>
+                <>
+                  <div className="select-wrapper">
+                    <select 
+                      value="" 
+                      onChange={(e) => {
+                         if (e.target.value) {
+                             // If we had logic to select from list w/o prompt
+                             // But mostly we need prompt for permission? 
+                             // We don't have setSelectedUSBDevice exposed or logic for it without prompt maybe?
+                             // useUSBDevices exposes setSelectedUSBDevice.
+                             // But typical WebUSB flow is 'requestDevice'. 
+                             // However, getDevices() returns granted devices. 
+                             // So we CAN select them.
+                         }
+                      }}
+                      disabled={usbDevices.length === 0}
+                    >
+                      {usbDevices.length === 0 ? (
+                        <option>No DFU devices found</option>
+                      ) : (
+                        <>
+                            <option value="" disabled>Select device...</option>
+                            {usbDevices.map(d => <option key={d} value={d}>{d}</option>)}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                  <button 
+                    className="btn-success" 
+                    onClick={() => refreshUSBDevices({ request: true })}
+                    disabled={isFlashing || isScanningUSB}
+                  >
+                    {isScanningUSB ? 'Scanning...' : 'Add Device'}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -355,22 +461,64 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {metadata?.description && (
+      {metadata?.description && flashMethod !== 'stlink' && (
         <div className="description-box">
-          <pre>{metadata.description}</pre>
+          <div className="flash-card-header">
+             <div className="flash-card-title">Flashing Notes</div>
+          </div>
+          <div className="description-content">
+            {metadata.description.trim().split('\n').filter((line: string) => line.trim() !== '').map((line: string, i: number) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {flashMethod === 'stlink' && (
+        <div className="external-flash-card">
+              <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="flash-card-icon">⚡</div>
+                    <div>
+                      <div className="flash-card-title">External Flashing Required</div>
+                      <div className="flash-card-desc">This device uses the STLink/SWD interface.</div>
+                    </div>
+                </div>
+                <a 
+                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
+                    download={selectedFile}
+                    className="btn-download"
+                >
+                    Download Firmware
+                </a>
+              </div>
+
+              <div className="flash-steps">
+                <div className="flash-step">
+                  <span>Download the .hex firmware file</span>
+                </div>
+                <div className="flash-step">
+                  <span>Open <strong>STM32 Cube Programmer</strong></span>
+                </div>
+                <div className="flash-step">
+                  <span>Connect via STLink and flash</span>
+                </div>
+              </div>
         </div>
       )}
 
       <div className="button-row">
-        <button 
-          className="btn-primary btn-flash"
-          onClick={handleFlash}
-          disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles}
-        >
-          {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
-            (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
-            (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
-        </button>
+        {flashMethod !== 'stlink' && (
+            <button 
+            className="btn-primary btn-flash"
+            onClick={handleFlash}
+            disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles}
+            >
+            {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
+                (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+            </button>
+        )}
 
         {allowWirelessBridge && metadata?.hasWirelessBridge && (
            <button 

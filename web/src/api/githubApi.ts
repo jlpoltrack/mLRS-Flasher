@@ -86,6 +86,51 @@ export const githubApi = {
     return [];
   },
 
+  listWirelessBridgeFirmware: async (options: { version: string, chipset: string }): Promise<FirmwareFile[]> => {
+    // Wireless bridge firmware is always pulled from main branch, as it's not versioned with releases
+    const cacheKey = `firmware-main`; 
+    let tree: any[] = [];
+
+    try {
+      if (cache[cacheKey]) {
+        tree = cache[cacheKey];
+      } else {
+        const treeUrl = `${REPOSITORY_TREE_URL}main?recursive=true`;
+        const response = await fetch(treeUrl);
+        const data = await response.json();
+        tree = data.tree || [];
+        cache[cacheKey] = tree;
+      }
+
+      // Files are named mlrs-wireless-bridge-<chipset>.ino.bin (e.g. mlrs-wireless-bridge-esp8266.ino.bin)
+      const targetPrefix = `mlrs-wireless-bridge-${options.chipset}`;
+
+      return tree
+        .filter((item: any) => {
+          if (item.type !== 'blob') return false;
+          if (!item.path.includes('firmware/wirelessbridge/')) return false;
+          
+          const filename = item.path.split('/').pop() || '';
+          return filename.startsWith(targetPrefix);
+        })
+        .map((item: any) => {
+          const filename = item.path.split('/').pop();
+          const ref = 'main'; // Always use main for wireless bridge
+          const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/${item.path}`;
+
+          return {
+            filename,
+            path: item.path,
+            url: rawUrl,
+            size: item.size
+          };
+        });
+    } catch (e) {
+      console.error('Failed to list wireles bridge firmware:', e);
+      return [];
+    }
+  },
+
   listFirmware: async (options: { type: string, device?: string, version: string }): Promise<{ files: FirmwareFile[] }> => {
     const cacheKey = `firmware-${options.version}`;
     let tree: any[] = [];
@@ -164,7 +209,14 @@ export const githubApi = {
     if (!deviceDict || Object.keys(deviceDict).length === 0) return null;
 
     const chipset = resolveChipset(deviceDict, targetDict, options.filename);
-    let flashmethod = targetDict.flashmethod || 'stlink';
+    
+    // Infer default flash method from chipset if not specified
+    let defaultFlashMethod = 'stlink';
+    if (chipset.includes('esp')) {
+      defaultFlashMethod = 'esptool';
+    }
+    
+    let flashmethod = targetDict.flashmethod || defaultFlashMethod;
     let description = targetDict.description || '';
     let wireless = targetDict.wireless;
 
@@ -204,7 +256,8 @@ export const githubApi = {
       description,
       needsPort,
       programmer,
-      hasWirelessBridge: !!wireless
+      hasWirelessBridge: !!wireless,
+      wireless
     };
   }
 };
