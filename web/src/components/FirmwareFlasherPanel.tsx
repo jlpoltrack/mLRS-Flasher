@@ -57,7 +57,6 @@ function FirmwareFlasherPanel({
 
   const {
     selectedUSBDevice,
-    setSelectedUSBDevice,
     isScanningUSB,
     refreshUSBDevices,
   } = useUSBDevices(isFlashing);
@@ -123,14 +122,16 @@ function FirmwareFlasherPanel({
       type: targetType,
       programmer: programmer, 
       device: selectedDevice,
+      version: selectedVersion,
       flashMethod: flashMethod,
       url: file.url,
       filename: file.filename,
       port: selectedPort || undefined,
+      usbDeviceName: selectedUSBDevice || undefined,
       baudrate: (flashMethod === 'uart') ? 115200 : undefined,
       target: targetType === 'rx' ? 'receiver' : 'tx_module',
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedPort, serialX, setError, onFlash, targetType]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, serialX, setError, onFlash, targetType]);
 
   const handleFlashWirelessBridge = useCallback(() => {
     const file = firmwareFiles.find(f => f.filename === selectedFile);
@@ -139,12 +140,14 @@ function FirmwareFlasherPanel({
     onFlash({
       type: targetType,
       programmer: 'esp wirelessbridge',
+      device: selectedDevice,
+      version: selectedVersion,
       url: file.url,
       filename: file.filename,
       port: selectedPort || undefined,
       target: 'wireless_bridge',
     });
-  }, [firmwareFiles, selectedFile, selectedPort, onFlash, targetType]);
+  }, [firmwareFiles, selectedFile, selectedDevice, selectedVersion, selectedPort, onFlash, targetType]);
 
   const isDevVersion = selectedVersion?.includes('dev');
 
@@ -302,7 +305,7 @@ function FirmwareFlasherPanel({
                 </select>
               </div>
               <button 
-                className="btn-secondary" 
+                className="btn-success" 
                 onClick={() => refreshPorts({ request: true })}
                 disabled={isFlashing || isScanningPorts}
               >
@@ -317,26 +320,29 @@ function FirmwareFlasherPanel({
           <div className="form-group port-group full-width">
             <label>USB Device (DFU)</label>
             <div className="port-row">
-              <div className="select-wrapper">
-                <select 
-                  value={selectedUSBDevice} 
-                  onChange={(e) => setSelectedUSBDevice(e.target.value)}
+              {selectedUSBDevice ? (
+                <>
+                  <div className="static-display">
+                    {selectedUSBDevice}
+                  </div>
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => refreshUSBDevices({ request: true })}
+                    disabled={isFlashing || isScanningUSB}
+                  >
+                    Change Device
+                  </button>
+                </>
+              ) : (
+                <button 
+                  className="btn-success" 
+                  style={{ width: '100%' }}
+                  onClick={() => refreshUSBDevices({ request: true })}
                   disabled={isFlashing || isScanningUSB}
                 >
-                  {!selectedUSBDevice ? (
-                    <option>No device selected</option>
-                  ) : (
-                    <option value={selectedUSBDevice}>{selectedUSBDevice}</option>
-                  )}
-                </select>
-              </div>
-              <button 
-                className="btn-secondary" 
-                onClick={() => refreshUSBDevices({ request: true })}
-                disabled={isFlashing || isScanningUSB}
-              >
-                {isScanningUSB ? 'Connecting...' : 'Add USB Device'}
-              </button>
+                  {isScanningUSB ? 'Connecting...' : 'Add USB Device (DFU)'}
+                </button>
+              )}
             </div>
           </div>
         )}

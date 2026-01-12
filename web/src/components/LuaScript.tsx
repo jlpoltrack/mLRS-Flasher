@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/mockApi';
+import { api } from '../api/webSerialApi';
 import type { Version, FirmwareFile } from '../types';
 import './panel.css';
 
@@ -41,18 +41,15 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
 
   const handleDownload = async () => {
     try {
-      const path = await api.pickDirectory();
-      if (!path) return; // user cancelled
-
       setIsDownloading(true);
       setError(null);
       
-      // trigger download via IPC
-      api.downloadLua({
+      await api.downloadLua({
         version: 'main',
-        output: path,
         filename: selectedFile === 'all' ? null : selectedFile
       });
+      
+      setIsDownloading(false);
     } catch (err: any) {
       console.error('Failed to download Lua scripts:', err);
       setError(`Failed to start download: ${err.message || err}`);

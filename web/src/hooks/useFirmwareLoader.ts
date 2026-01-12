@@ -213,19 +213,38 @@ export function useUSBDevices(_isPaused = false) {
     if (request) setIsScanningUSB(true);
     
     try {
+      let result;
       if (request) {
-        await api.requestUSBDevice();
+        const name = await api.requestUSBDevice();
+        result = await api.listUSBDevices();
+        if (name && isMountedRef.current) {
+          setSelectedUSBDevice(name);
+        }
+      } else {
+        result = await api.listUSBDevices();
       }
-      // api.listUSBDevices is not implemented yet, using an empty list placeholder
-      // For now, we rely on the one returned by requestUSBDevice which is stored in the API
+      
+      if (!isMountedRef.current) return;
+      
+      const newDevices = result.devices || [];
+      setUsbDevices(newDevices);
+      
+      if (newDevices.length > 0 && !selectedUSBDevice) {
+        setSelectedUSBDevice(newDevices[0]);
+      }
     } catch (err) {
-      console.error('Failed to request USB device:', err);
+      console.error('Failed to list USB devices:', err);
     } finally {
       if (isMountedRef.current) {
         setIsScanningUSB(false);
       }
     }
   }, []);
+
+  // initial refresh
+  useEffect(() => {
+    refreshUSBDevices();
+  }, [refreshUSBDevices]);
 
   return {
     usbDevices: _usbDevices,

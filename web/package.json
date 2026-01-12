@@ -10,8 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
+    "dfu": "^0.1.5",
     "esptool-js": "^0.5.7",
+    "intel-hex": "^0.2.0",
     "lucide-react": "^0.562.0",
+    "node-mavlink": "^2.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "webdfu": "^1.0.5"

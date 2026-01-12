@@ -26,14 +26,7 @@ export const githubApi = {
       
       const versions: Version[] = [];
       
-      // Add 'main' branch as a version for dev/latest
-      versions.push({
-        version: 'main',
-        versionStr: 'main (dev)',
-        commit: 'main',
-        gitUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}/tree/main`
-      });
-
+      // 1. Add Official/Pre-releases from JSON
       for (const key in data) {
         const item = data[key];
         let versionStr = key;
@@ -47,6 +40,35 @@ export const githubApi = {
           commit: item.commit,
           gitUrl: item.url
         });
+      }
+
+      // 2. Discover dev version from main branch tree
+      try {
+        const treeResp = await fetch(`${REPOSITORY_TREE_URL}main?recursive=true`);
+        const treeData = await treeResp.json();
+        const tree = treeData.tree || [];
+        
+        // Find a firmware file to extract the version string from (e.g. v1.3.07-@21c6abd9)
+        const sampleFile = tree.find((f: any) => f.path.includes('pre-release-stm32/') && f.path.endsWith('.hex'));
+        if (sampleFile) {
+            const parts = sampleFile.path.split('-');
+            const vPart = parts.find((p: string) => p.startsWith('v') && p.includes('.'));
+            const cPart = parts.find((p: string) => p.startsWith('@'));
+            
+            if (vPart && cPart) {
+                const devVer = `${vPart}-${cPart}`;
+                versions.push({
+                    version: 'main',
+                    versionStr: `${devVer} (dev)`,
+                    commit: 'main',
+                    gitUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}/tree/main`
+                });
+            } else {
+                versions.push({ version: 'main', versionStr: 'main (dev)', commit: 'main', gitUrl: '...' });
+            }
+        }
+      } catch (e) {
+        versions.push({ version: 'main', versionStr: 'main (dev)', commit: 'main', gitUrl: '...' });
       }
 
       cache['versions'] = versions;
@@ -101,15 +123,17 @@ export const githubApi = {
             return path.includes('lua/') && path.endsWith('.lua');
           }
 
-          // Filter by firmware directory (Python logic: 'firmware' or 'pre-release' in path)
-          if (!path.includes('firmware') && !path.includes('pre-release')) return false;
+          // Filter by firmware directory
+          const isFirmwarePath = path.includes('firmware/') || path.includes('pre-release-');
+          if (!isFirmwarePath) return false;
           
           // Filter by internal/external
           if (options.type === 'txint' && !path.includes('-internal-')) return false;
           if (options.type !== 'txint' && path.includes('-internal-')) return false;
 
-          // Filter by device filename pattern
-          if (fname && !path.includes(fname)) return false;
+          // Filter by device filename pattern (tx-matek, etc)
+          const filename = path.split('/').pop() || '';
+          if (fname && !filename.includes(fname)) return false;
 
           return true;
         })
@@ -118,7 +142,7 @@ export const githubApi = {
           // Use jsDelivr for raw file downloads to avoid rate limits
           const versionObj = cache['versions']?.find((v: any) => v.version === options.version);
           const ref = versionObj?.commit || 'main';
-          const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
+          const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/${item.path}`;
 
           return {
             filename,

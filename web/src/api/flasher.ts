@@ -1,5 +1,13 @@
 import { ESPLoader, Transport } from 'esptool-js';
-import { WebDFU } from 'webdfu';
+import { DFU, DFUse } from 'webdfu';
+// @ts-ignore
+import intelhex from 'intel-hex';
+import { Buffer } from 'buffer';
+
+// Shim Buffer for libraries that expect it (like intel-hex)
+if (typeof window !== 'undefined' && !(window as any).Buffer) {
+    (window as any).Buffer = Buffer;
+}
 
 export interface FlasherOptions {
   chipset: string;
@@ -8,6 +16,8 @@ export interface FlasherOptions {
   erase?: string;
   onProgress?: (progress: number, status: string) => void;
   onLog?: (message: string) => void;
+  targetType?: string; // rx, tx, txint
+  filename?: string;
 }
 
 export async function flash(
@@ -15,27 +25,115 @@ export async function flash(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { chipset, onProgress, onLog } = options;
+  const { chipset, onLog } = options;
 
   onLog?.(`Starting flash process for chipset: ${chipset}...`);
 
-  if (chipset.startsWith('esp')) {
-    if (!(port instanceof SerialPort)) {
-        throw new Error('ESP flashing requires a SerialPort');
+  if (chipset === 'stm32') {
+    // For internal modules, we might need EdgeTX passthrough
+    if (options.targetType === 'txint' && port.constructor.name === 'SerialPort') {
+        onLog?.("Initializing EdgeTX Passthrough for internal module...");
+        await initEdgeTXPassthrough(port as SerialPort, options.baud || 115200, onLog);
+        // After passthrough, we may need to wait or slightly delay
+        await new Promise(r => setTimeout(r, 500));
     }
-    return flashESP(port, firmwareData, options);
-  } else if (chipset === 'stm32') {
+
     // In mLRS, 'stm32' can be DFU or UART depending on the target.
-    // We'll need more logic here or the caller should specify.
-    // For now, let's assume if it's a USBDevice it's DFU, else UART.
     if (port instanceof USBDevice) {
         return flashSTM32DFU(port, firmwareData, options);
     } else {
         return flashSTM32UART(port, firmwareData, options);
     }
+  } else if (chipset.startsWith('esp')) {
+     if (port.constructor.name !== 'SerialPort') {
+         throw new Error('ESP flashing requires a SerialPort');
+     }
+     
+     if (options.targetType === 'txint') {
+         onLog?.("Initializing EdgeTX Passthrough for internal module...");
+         await initEdgeTXPassthrough(port as SerialPort, options.baud || 115200, onLog);
+         await new Promise(r => setTimeout(r, 500));
+     }
+
+     return flashESP(port as SerialPort, firmwareData, options);
   } else {
     throw new Error(`Unsupported chipset: ${chipset}`);
   }
+}
+
+export async function initEdgeTXPassthrough(
+    port: SerialPort,
+    baudrate: number,
+    onLog?: (msg: string) => void
+): Promise<void> {
+    onLog?.("EdgeTX Passthrough: Connecting to radio...");
+    
+    // We must ensure the port is opened at 115200 for CLI commands
+    // Web Serial might already have it open, so we need to be careful.
+    // In our web app structure, the port is usually NOT yet opened when flash() is called.
+    
+    const wasOpen = !!port.readable;
+    if (!wasOpen) {
+        await port.open({ baudRate: 115200 });
+    }
+
+    const reader = port.readable!.getReader();
+    const writer = port.writable!.getWriter();
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+
+    const executeCommand = async (cmd: string, expected?: string, timeout = 2000): Promise<string> => {
+        onLog?.(`> ${cmd}`);
+        await writer.write(encoder.encode(cmd + '\n'));
+        
+        let response = '';
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < timeout) {
+            const { value, done } = await Promise.race([
+                reader.read(),
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 500))
+            ]).catch(() => ({ value: null, done: false }));
+
+            if (done) break;
+            if (value) {
+                response += decoder.decode(value);
+                if (response.endsWith('\r\n> ')) break;
+            }
+        }
+
+        if (expected && !response.includes(expected)) {
+            // Some commands might have different responses depending on EdgeTX version
+            // For now, just log and continue if it's not a critical failure
+            onLog?.(`Warning: Expected "${expected}" in response, but got: ${response.trim()}`);
+        }
+        return response;
+    };
+
+    try {
+        await executeCommand('set pulses 0', 'pulses stop');
+        await executeCommand('set rfmod 0 bootpin 1', 'boot');
+        
+        onLog?.("Power cycling RF module...");
+        await executeCommand('set rfmod 0 power off');
+        await new Promise(r => setTimeout(r, 1000));
+        await executeCommand('set rfmod 0 power on');
+        await new Promise(r => setTimeout(r, 1000));
+
+        await executeCommand('set rfmod 0 bootpin 1', 'boot');
+        await executeCommand('set rfmod 0 bootpin 0', 'boot');
+
+        onLog?.(`Enabling serial passthrough at ${baudrate} baud...`);
+        // Note: we don't wait for response here as the CLI effectively terminates
+        await writer.write(encoder.encode(`serialpassthrough rfmod 0 ${baudrate}\n`));
+        await new Promise(r => setTimeout(r, 500));
+        
+    } finally {
+        reader.releaseLock();
+        writer.releaseLock();
+        // We close the port so that the subsequent flash step can re-open it at the target baud rate
+        await port.close();
+    }
 }
 
 async function flashESP(
@@ -104,28 +202,214 @@ async function flashSTM32DFU(
   const { onProgress, onLog } = options;
   onLog?.("Starting STM32 DFU flash...");
   
+  let binaryData = firmwareData;
+  if (options.filename?.toLowerCase().endsWith('.hex')) {
+      onLog?.("Converting Intel HEX to binary...");
+      
+      // Mimic hex2bin from mlrs.xyz / dfu-util.js
+      const decoder = new TextDecoder('utf-8');
+      const hexString = decoder.decode(firmwareData);
+      const lines = hexString.split(/\r?\n/);
+      const binary: number[] = [];
+
+      lines.forEach(line => {
+          if (line.length !== 0) {
+              // Validate the line starts with ':'
+              if (line[0] !== ':') {
+                  // console.log(line);
+                   // throw new Error("Invalid Intel HEX format"); // Loose parsing to be safe?
+                   return; // Skip invalid lines
+              }
+
+              // Extract length, address, type, and data
+              const length = parseInt(line.substring(1, 3), 16);
+              const recordType = parseInt(line.substring(7, 9), 16);
+              const data = line.substring(9, 9 + length * 2);
+
+              // Only handle data records (type 00)
+              if (recordType === 0) {
+                  for (let i = 0; i < length; i++) {
+                      const byte = parseInt(data.substring(i * 2, i * 2 + 2), 16);
+                      binary.push(byte);
+                  }
+              }
+          }
+      });
+      
+      // Convert binary array to ArrayBuffer
+      binaryData = new Uint8Array(binary).buffer;
+      onLog?.(`HEX converted: ${binaryData.byteLength} bytes`);
+  }
+  
   try {
-    const dfu = new WebDFU(device, { forceInterfacesName: true });
-    await dfu.init();
+    // Correct DFU usage based on webdfu implementation and mlrs.xyz reference
     
-    if (dfu.interfaces.length === 0) {
-        throw new Error("No DFU interfaces found on device");
+    // 1. Find valid DFU interfaces
+    const interfaces = DFU.findDeviceDfuInterfaces(device);
+    if (!interfaces || interfaces.length === 0) {
+       throw new Error("No DFU interfaces found on device. Ensure it is in DFU mode.");
+    }
+    
+    // 1b. Fix interface names if they are null (mimics fixInterfaceNames from reference)
+    if (interfaces.some((intf: any) => intf.name === null)) {
+        onLog?.("Reading interface names from device descriptors...");
+        const tempDevice = new DFU.Device(device, interfaces[0]);
+        await tempDevice.device_.open();
+        await tempDevice.device_.selectConfiguration(1);
+        const mapping = await tempDevice.readInterfaceNames();
+        await tempDevice.close();
+        
+        for (const intf of interfaces) {
+            if (intf.name === null) {
+                const configIndex = intf.configuration.configurationValue;
+                const intfNumber = intf["interface"].interfaceNumber;
+                const alt = intf.alternate.alternateSetting;
+                if (mapping[configIndex] && mapping[configIndex][intfNumber] && mapping[configIndex][intfNumber][alt]) {
+                    intf.name = mapping[configIndex][intfNumber][alt];
+                }
+            }
+        }
+    }
+    
+    // 2. Select the first interface (standard practice), preferring Flash interface if multiple exist
+    let settings = interfaces[0];
+    if (interfaces.length > 1) {
+        const flashInterface = interfaces.find((a: any) => a.name && a.name.indexOf('Flash') !== -1);
+        if (flashInterface) {
+            settings = flashInterface;
+        }
+    }
+    onLog?.(`Found DFU interface: ${settings.name || 'Unnamed'} (Alt ${settings.alternate.alternateSetting})`);
+
+    // 3. Create initial DFU device instance to read descriptors
+    let dfu: InstanceType<typeof DFU.Device> | InstanceType<typeof DFUse.Device> = new DFU.Device(device, settings);
+
+    // 4. Hook up logging helper
+    let lastLoggedProgress = 0;
+    const setupLogging = (dev: any) => {
+        dev.logDebug = (msg: string) => console.debug(msg);
+        dev.logInfo = (msg: string) => onLog?.(msg);
+        dev.logWarning = (msg: string) => onLog?.(`Warning: ${msg}`);
+        dev.logError = (msg: string) => onLog?.(`Error: ${msg}`);
+        dev.logProgress = (done: number, total: number) => {
+            if (total) {
+                const progress = Math.round((done / total) * 100);
+                onProgress?.(progress, `Flash: ${progress}%`);
+                
+                // Reset tracker if a new operation starts (progress drops)
+                if (progress < lastLoggedProgress) {
+                    lastLoggedProgress = 0;
+                }
+
+                // Log every 10% (when the 10s digit changes) or at 100%
+                if (progress === 100 || Math.floor(progress / 10) > Math.floor(lastLoggedProgress / 10)) {
+                    onLog?.(`Progress: ${progress}%`);
+                    lastLoggedProgress = progress;
+                }
+            } else {
+                 onProgress?.(0, `Flash: ${done} bytes`);
+            }
+        };
+    };
+    setupLogging(dfu);
+
+    onLog?.("Opening DFU device...");
+    await dfu.open();
+    
+    // 5. Determine DFU version and Manifestation Tolerance from Descriptor
+    let manifestationTolerant = true; // Default
+    let dfuVersion = 0;
+    let transferSize = 2048; // Default for STM32
+    try {
+        const data = await dfu.readConfigurationDescriptor(0);
+        const configDesc = DFU.parseConfigurationDescriptor(data);
+        
+        let funcDesc = null;
+        let configValue = dfu.settings.configuration.configurationValue;
+        if (configDesc.bConfigurationValue === configValue) {
+            for (let desc of configDesc.descriptors) {
+                if (desc.bDescriptorType === 0x21 && desc.hasOwnProperty("bcdDFUVersion")) {
+                    funcDesc = desc;
+                    break;
+                }
+            }
+        }
+        
+        if (funcDesc) {
+            if (funcDesc.bmAttributes !== undefined) {
+                 const canDnload = (funcDesc.bmAttributes & 0x01) !== 0;
+                 if (canDnload) {
+                     manifestationTolerant = (funcDesc.bmAttributes & 0x04) !== 0;
+                 }
+            }
+            if (funcDesc.wTransferSize !== undefined) {
+                transferSize = funcDesc.wTransferSize;
+            }
+            if (funcDesc.bcdDFUVersion !== undefined) {
+                dfuVersion = funcDesc.bcdDFUVersion;
+            }
+            onLog?.(`DFU Descriptor: Version=0x${dfuVersion.toString(16)}, ManifestationTolerant=${manifestationTolerant}, TransferSize=${transferSize}`);
+        }
+        
+    } catch (error) {
+         onLog?.(`Warning: Failed to read DFU descriptor. Error: ${error}`);
     }
 
-    onLog?.(`Found ${dfu.interfaces.length} DFU interfaces. Connecting to first one...`);
-    await dfu.connect(0);
+    // 6. If DFU version is 0x011a (DFuSe) and in DFU mode, switch to DFUse.Device
+    if (dfuVersion === 0x011a && settings.alternate.interfaceProtocol === 0x02) {
+        onLog?.("DFuSe protocol detected. Switching to DFUse device...");
+        await dfu.close();
+        dfu = new DFUse.Device(device, settings);
+        setupLogging(dfu);
+        await dfu.open();
+        
+        // Check memory info and set start address
+        const dfuseDevice = dfu as InstanceType<typeof DFUse.Device>;
+        if (dfuseDevice.memoryInfo) {
+            onLog?.(`Memory: ${dfuseDevice.memoryInfo.name}`);
+            let totalSize = 0;
+            for (let segment of dfuseDevice.memoryInfo.segments) {
+                totalSize += segment.end - segment.start;
+            }
+            onLog?.(`Total writable: ${(totalSize / 1024).toFixed(1)} KB`);
+            
+            // Set start address to first writable segment to avoid "inferred" warning
+            const firstWritable = dfuseDevice.memoryInfo.segments.find(s => s.writable);
+            if (firstWritable) {
+                dfuseDevice.startAddress = firstWritable.start;
+                onLog?.(`Start address: 0x${firstWritable.start.toString(16)}`);
+            }
+        } else {
+            onLog?.("Warning: No memory info parsed from interface name.");
+        }
+    }
 
     onLog?.("DFU connected. Beginning firmware download...");
     
-    // WebDFU write takes a block size and the data
-    const transferSize = 2048; // Common for STM32
-    
-    await dfu.write(transferSize, firmwareData, true); // true for manifestation
-    
-    onProgress?.(100, "Done");
+    // do_download handles the whole process including manifestation
+    try {
+        await dfu.do_download(transferSize, binaryData, manifestationTolerant);
+    } catch (error: any) {
+        // webdfu throws an error if reset fails because the device disconnected.
+        // This is actually success (device rebooted).
+        if (error.message && (
+            error.message.includes("Error during reset for manifestation") || 
+            error.message.includes("The device was disconnected") ||
+            error.message.includes("Device unavailable")
+        )) {
+            onLog?.("Device reset successfully (connection lost as expected).");
+        } else {
+            throw error;
+        }
+    }
+
     onLog?.("STM32 DFU Flash complete!");
     
-    await dfu.detach();
+    // Attempt closure if still connected
+    try {
+        await dfu.close(); 
+    } catch (e) { /* ignore */ }
+    
   } catch (err: any) {
     onLog?.(`Error during STM32 DFU flash: ${err.message}`);
     throw err;
@@ -139,6 +423,29 @@ async function flashSTM32UART(
 ): Promise<void> {
   const { onProgress, onLog } = options;
   onLog?.("Starting STM32 UART flash (AN2606)...");
+  onLog?.("Ensure device is in bootloader mode (usually by holding BOOT button while powering up).");
+
+  let binaryData = firmwareData;
+  if (options.filename?.toLowerCase().endsWith('.hex')) {
+      onLog?.("Converting Intel HEX to binary...");
+      const hexText = new TextDecoder().decode(firmwareData);
+      
+      // Calculate offset (avoid 250MB buffers)
+      let addressOffset = 0;
+      const hexLines = hexText.split('\n');
+      for (const line of hexLines) {
+          if (line.startsWith(':02000004')) {
+              addressOffset = parseInt(line.substring(9, 13), 16) << 16;
+              break;
+          }
+      }
+      onLog?.(`Using address offset: 0x${addressOffset.toString(16)}`);
+      
+      const parsed = intelhex.parse(hexText, 0, addressOffset);
+      const dataBuf = (parsed.data || parsed);
+      binaryData = dataBuf.buffer ? dataBuf.buffer.slice(dataBuf.byteOffset, dataBuf.byteOffset + dataBuf.byteLength) : dataBuf;
+      onLog?.(`HEX converted: ${binaryData.byteLength} bytes`);
+  }
   
   const protocol = new Stm32UartProtocol(port, onLog);
   try {
@@ -152,7 +459,7 @@ async function flashSTM32UART(
     await protocol.eraseAll();
 
     onLog?.("Writing firmware...");
-    const data = new Uint8Array(firmwareData);
+    const data = new Uint8Array(binaryData);
     const total = data.length;
     let written = 0;
     const chunkSize = 256;
@@ -172,6 +479,9 @@ async function flashSTM32UART(
     onLog?.("STM32 UART Flash complete!");
   } catch (err: any) {
     onLog?.(`Error during STM32 UART flash: ${err.message}`);
+    if (err.message.includes("no ACK") || err.message.includes("timeout")) {
+        onLog?.("Hint: Check your connections and ensure the device is in bootloader mode.");
+    }
     throw err;
   }
 }
@@ -180,6 +490,7 @@ class Stm32UartProtocol {
     private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
     private port: SerialPort;
+    // @ts-ignore
     private onLog?: (msg: string) => void;
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
@@ -189,7 +500,7 @@ class Stm32UartProtocol {
 
     async connect() {
         // STM32 bootloader uses 8E1, usually starts at 115200 or auto-bauds
-        await this.port.open({ baudRate: 115200, parity: 'even' });
+        await (this.port as any).open({ baudRate: 115200, parity: 'even' });
         this.reader = this.port.readable!.getReader();
         this.writer = this.port.writable!.getWriter();
 
