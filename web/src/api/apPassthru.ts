@@ -310,133 +310,215 @@ export async function initApPassthrough(
     onLog?: (msg: string) => void
 ): Promise<{ port: SerialPort, baudRate: number }> {
     
+    // Parse target SERIAL index
     const match = passthroughSerialStr.match(/SERIAL(\d+)/i);
     let serialIndex = 2; // default
     if (match) serialIndex = parseInt(match[1]);
+    const pProtocolName = `SERIAL${serialIndex}_PROTOCOL`;
 
-    const mav = new MavLinkConnection(port, onLog);
-    mav.initPipeline();
+    // 1. Identify Target Device Type
+    const info = port.getInfo();
+    const targetVid = info.usbVendorId;
+    const targetPid = info.usbProductId;
 
     onLog?.("------------------------------------------------------------");
-    onLog?.("Find USB port of your flight controller");
-    onLog?.("USB port: Selected Port"); 
-    onLog?.("Baud rate: 57600");
-    onLog?.(`SERIALx number: ${serialIndex}`);
+    onLog?.(`AP Passthru (Strict MAVLink 2.0) - ${passthroughSerialStr}`);
     onLog?.("------------------------------------------------------------");
+    
+    let mav: MavLinkConnection | null = null;
+    let activePort = port;
 
     // ---------------------------------------------------------
-    // 1. ardupilot_connect
+    // 1. Establish Active Connection (Scan Mode)
     // ---------------------------------------------------------
-    onLog?.("connect to flight controller...");
     
-    // We try 57600 as per Python default
-    await mav.connect(57600);
+    // Logic: Identify all candidate ports. Try each one.
+    // If we find a heartbeat, lock it.
     
-    // 1st Heartbeat (10s timeout)
-    if (!await mav.waitForHeartbeat(10000)) {
-        await mav.disconnect();
-        throw new Error("No Heartbeat received from FC (10s timeout).");
+    // @ts-ignore
+    const candidates = (await navigator.serial.getPorts()).filter((p: any) => {
+         const i = p.getInfo();
+         return i.usbVendorId === targetVid && i.usbProductId === targetPid;
+    });
+
+    if (candidates.length === 0) candidates.push(port); // Fallback
+
+    onLog?.(`Found ${candidates.length} matching port(s). Scanning for heartbeat...`);
+
+    let foundInitial = false;
+    for (let i = 0; i < candidates.length; i++) {
+        const p = candidates[i];
+        
+        onLog?.(`[Candidate ${i+1}/${candidates.length}] Probe Connecting...`);
+        
+        const m = new MavLinkConnection(p, onLog);
+        try {
+            await m.connect(57600);
+            m.initPipeline(); 
+            
+            // Wait up to 5s for heartbeat (User Request)
+            if (await m.waitForHeartbeat(5000)) {
+                onLog?.(`[Candidate ${i+1}] Heartbeat detected! Active Device Found.`);
+                mav = m;
+                activePort = p;
+                foundInitial = true;
+                break;
+            } else {
+                onLog?.(`[Candidate ${i+1}] No heartbeat (5s). Disconnecting...`);
+                await m.disconnect();
+            }
+        } catch (e) {
+            onLog?.(`[Candidate ${i+1}] Error: ${e}`);
+            try { await m.disconnect(); } catch (err) {} 
+        }
     }
 
-    // Set target system/comp from first heartbeat is handled in waitForHeartbeat
-    
-    // 2nd Heartbeat (2.5s timeout) - strict Python logic
-    if (!await mav.waitForHeartbeat(2500)) {
-        await mav.disconnect();
-        throw new Error("Second Heartbeat verification failed.");
+    if (!foundInitial || !mav) {
+        throw new Error("Connection failed: No MAVLink heartbeat detected on any candidate port (10s window).");
     }
 
-    onLog?.(`received (sysid ${mav.targetSysId} compid ${mav.targetCompId})`);
-    onLog?.("connected to flight controller");
-    onLog?.("------------------------------------------------------------");
+    // ---------------------------------------------------------
+    // 2. Initial Setup Checks
+    // ---------------------------------------------------------
+    
+    // We have a live connection 'mav'. 
+    // Perform parameter checks.
+    
+    const pBaudName = `SERIAL${serialIndex}_BAUD`;
+    // onLog?.(`Reading Link Parameters...`);
+    const protocol = await mav.paramRead(pProtocolName);
+    const baudVal = await mav.paramRead(pBaudName);
+    
+    if (protocol === null || baudVal === null) throw new Error("Failed to read SERIAL parameters.");
+
+    // Strict Mode validation
+    if (protocol !== 2 && protocol !== 28) {
+         throw new Error(`Invalid ${pProtocolName}=${protocol}. Must be 2 (MAVLink2) or 28 (Scripting).`);
+    }
+
+    // Baud Rate Check
+    let receiverBaud = 57600;
+    if (baudVal === 57) receiverBaud = 57600;
+    else if (baudVal === 115) receiverBaud = 115200;
+    else if (baudVal === 230) receiverBaud = 230400;
+    else if (baudVal === 921) receiverBaud = 921600;
+    else if (baudVal === 38) receiverBaud = 38400;
+
+    if (receiverBaud !== 57600) {
+        onLog?.(`Receiver baud is ${receiverBaud}. Switching link...`);
+        await mav.disconnect();
+        await new Promise(r => setTimeout(r, 500));
+        await mav.connect(receiverBaud);
+        // Quick verify
+        if (!await mav.waitForHeartbeat(5000)) {
+             await mav.disconnect();
+             throw new Error(`Failed to reconnect at ${receiverBaud}.`);
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 3. ESP Workflow
+    // ---------------------------------------------------------
+    if (isEsp) {
+        // Assume we always need to force bootloader mode for ESP
+        if (protocol !== 28) {
+             onLog?.(`ESP: Setting ${pProtocolName} -> 28 (Scripting)...`);
+             try { await mav.paramSet(pProtocolName, 28); } catch(e) {}
+             
+             onLog?.("---------------------------------------------------");
+             onLog?.("1. Power down the flight controller.");
+             onLog?.("2. Hold down the receiver BOOT button.");
+             onLog?.("3. Power up the flight controller and plug in USB.");
+             onLog?.("   You have 60 seconds to reconnect.");
+             onLog?.("---------------------------------------------------");
+
+             await mav.disconnect();
+
+             onLog?.("Waiting for device disconnect...");
+             // Wait for physical unplug
+             while (true) {
+                 try {
+                     await activePort.open({ baudRate: 57600 });
+                     await activePort.close();
+                     // If open worked, device is still here.
+                     await new Promise(r => setTimeout(r, 500));
+                 } catch (e) {
+                     onLog?.("Device disconnected.");
+                     break;
+                 }
+             }
+
+             onLog?.("Scanning for Reconnection (Active)...");
+
+             let reconnectedMav: MavLinkConnection | null = null;
+             let reconnectedPort: any = null;
+             const startTime = Date.now();
+
+             // 60s Reconnect Loop
+             while (Date.now() - startTime < 60000) {
+                 // Refresh candidates
+                 // @ts-ignore
+                 const freshCandidates = (await navigator.serial.getPorts()).filter((p: any) => {
+                     const i = p.getInfo();
+                     return i.usbVendorId === targetVid && i.usbProductId === targetPid;
+                 });
+                 
+                 for (let i=0; i<freshCandidates.length; i++) {
+                     const p = freshCandidates[i];
+                     const m = new MavLinkConnection(p, onLog);
+                     try {
+                         await m.connect(57600);
+                         m.initPipeline();
+                         // Quick check 2s
+                         if (await m.waitForHeartbeat(2000)) {
+                             onLog?.(`[Candidate ${i+1}] Reconnected & Active!`);
+                             reconnectedMav = m;
+                             reconnectedPort = p;
+                             break;
+                         }
+                         await m.disconnect();
+                     } catch(e) {}
+                 }
+                 if (reconnectedMav) break;
+                 await new Promise(r => setTimeout(r, 1000));
+             }
+             
+             if (!reconnectedMav) throw new Error("Timed out waiting for device reconnection.");
+             
+             mav = reconnectedMav;
+             activePort = reconnectedPort;
+             
+             // Restore Passthrough
+             onLog?.("Restoring Passthrough...");
+             await new Promise(r => setTimeout(r, 1000)); // Boot settle
+             await mav.paramSet(pProtocolName, 2);
+             await mav.paramSet("SERIAL_PASSTIMO", 0);
+             await mav.paramSet("SERIAL_PASS2", serialIndex);
+             await new Promise(r => setTimeout(r, 1500));
+        } else {
+             // Already in 28. Ensure passthrough.
+             onLog?.("ESP in Scripting Mode. Resetting to Passthrough...");
+             await mav.paramSet(pProtocolName, 2);
+             await mav.paramSet("SERIAL_PASSTIMO", 0);
+             await mav.paramSet("SERIAL_PASS2", serialIndex);
+             await new Promise(r => setTimeout(r, 1500));
+        }
+        
+        onLog?.("ESP Ready for Flashing.");
+        await mav?.disconnect();
+        await new Promise(r => setTimeout(r, 500));
+        return { port: activePort, baudRate: receiverBaud };
+        
+    } else {
+        // STM32
+        onLog?.("Activating Passthrough...");
+        await mav.paramSet(pProtocolName, 2);
+        await mav.paramSet("SERIAL_PASSTIMO", 0);
+        await mav.paramSet("SERIAL_PASS2", serialIndex);
+        await new Promise(r => setTimeout(r, 1500));
+    }
 
     try {
-        // ---------------------------------------------------------
-        // 2. ardupilot_find_serialx_baud
-        // ---------------------------------------------------------
-        onLog?.("find SERIALx, receiver baud rate...");
-        const pProtocolName = `SERIAL${serialIndex}_PROTOCOL`;
-        const pBaudName = `SERIAL${serialIndex}_BAUD`;
-
-        // onLog?.(`Reading ${pProtocolName}...`); 
-        const protocol = await mav.paramRead(pProtocolName);
-        if (protocol === null) throw new Error(`Failed to read ${pProtocolName}`);
-        
-        // Strict check: must be 2.0 or 28.0
-        if (protocol !== 2 && protocol !== 28) {
-            throw new Error(`Invalid ${pProtocolName}=${protocol}. Must be 2 (MAVLink2) or 28 (Scripting). Please check Mission Planner.`);
-        }
-
-        // onLog?.(`Reading ${pBaudName}...`);
-        const baudVal = await mav.paramRead(pBaudName);
-        if (baudVal === null) throw new Error(`Failed to read ${pBaudName}`);
-
-        let receiverBaud = 57600;
-        if (baudVal === 57) receiverBaud = 57600;
-        else if (baudVal === 115) receiverBaud = 115200;
-        else if (baudVal === 230) receiverBaud = 230400;
-        else if (baudVal === 921) receiverBaud = 921600;
-        else if (baudVal === 38) receiverBaud = 38400;
-        
-        // onLog?.(`Receiver Baud: ${receiverBaud}`);
-
-        if (receiverBaud !== 57600) {
-            // "Receiver baudrate is 230400 , change link to it"
-            onLog?.(`Receiver baudrate is ${receiverBaud} , change link to it`);
-            await mav.disconnect();
-            await new Promise(r => setTimeout(r, 500));
-            onLog?.("connect to flight controller...");
-            await mav.connect(receiverBaud);
-
-            // onLog?.("Waiting for Heartbeat 1 (after baud change)...");
-            if (!await mav.waitForHeartbeat(10000)) {
-                 await mav.disconnect();
-                 throw new Error(`Failed to reconnect at ${receiverBaud} baud.`);
-            }
-
-            // onLog?.("Waiting for Heartbeat 2 (after baud change)...");
-            if (!await mav.waitForHeartbeat(2500)) {
-                 await mav.disconnect();
-                 throw new Error("Second Heartbeat verification failed after baud change.");
-            }
-        } 
-
-        // ---------------------------------------------------------
-        // 3. Scripting / ESP Handling
-        // (Mimics ardupilot_set_scripting logic if needed)
-        // ---------------------------------------------------------
-        if (isEsp) {
-            // If we are here, protocol is 2 or 28 (checked above).
-            // If it is NOT 28, we must set it and ask for reboot.
-            if (protocol !== 28) {
-                 onLog?.(`ESP Mode: Setting ${pProtocolName} to Scripting (28)...`);
-                 await mav.paramSet(pProtocolName, 28);
-                 // In Python: link.close() and do_msg(Power down...)
-                 throw new Error("Setup: Scripting Mode (28) enabled. Please POWER CYCLE the Flight Controller, then try again.");
-            }
-            // If it IS 28, we proceed. 
-            // Note: Python's open_passthrough sets Protocol=2 below. 
-            // This is correct behavior for ESP flashing (set 28, reboot, then set 2 & passthrough).
-        }
-
-        // ---------------------------------------------------------
-        // 4. ardupilot_open_passthrough
-        // ---------------------------------------------------------
-        onLog?.("open serial passthrough...");
-
-        // "restore protocol to MAVLink2 in case it was changed to scripting"
-        // onLog?.(`Setting ${pProtocolName} = 2 (MAVLink2)`);
-        await mav.paramSet(pProtocolName, 2);
-
-        // onLog?.("Setting SERIAL_PASSTIMO = 0");
-        await mav.paramSet("SERIAL_PASSTIMO", 0);
-
-        // onLog?.(`Setting SERIAL_PASS2 = ${serialIndex}`);
-        await mav.paramSet("SERIAL_PASS2", serialIndex);
-
-        // onLog?.("Waiting 1.5s for passthrough activation...");
-        await new Promise(r => setTimeout(r, 1500)); 
-
         // ---------------------------------------------------------
         // Post-Setup (Bootloader Trigger) - mlrs_put_into_systemboot
         // ---------------------------------------------------------
@@ -486,7 +568,7 @@ export async function initApPassthrough(
         await new Promise(r => setTimeout(r, 200));
 
         onLog?.("PASSTHROUGH READY FOR PROGRAMMING TOOL");
-        return { port, baudRate: receiverBaud };
+        return { port: activePort, baudRate: receiverBaud };
         
     } finally {
         await mav.disconnect();

@@ -101,8 +101,10 @@ export const api = {
     if (!navigator.serial) return { ports: [] };
     // @ts-ignore
     const ports = await navigator.serial.getPorts();
-    return { ports: ports.map(formatPortName) };
+    const uniquePorts = getUniquePorts(ports);
+    return { ports: uniquePorts.map(p => p.name) };
   },
+
 
   requestPort: async (): Promise<string | null> => {
     if (!navigator.serial) {
@@ -122,7 +124,15 @@ export const api = {
       ];
       
       selectedPort = await navigator.serial.requestPort({ filters });
-      return formatPortName(selectedPort);
+      
+      // Calculate the unique name for this newly selected port
+      // so the UI can auto-select it confidently.
+      // @ts-ignore
+      const allPorts = await navigator.serial.getPorts();
+      const uniquePorts = getUniquePorts(allPorts);
+      const match = uniquePorts.find((p: any) => p.port === selectedPort);
+      
+      return match ? match.name : formatPortName(selectedPort);
     } catch (err) {
       return null;
     }
@@ -147,6 +157,18 @@ export const api = {
     } catch (err) {
       return null;
     }
+  },
+
+  forgetAllPorts: async (): Promise<void> => {
+    if (!navigator.serial) return;
+    // @ts-ignore
+    const ports = await navigator.serial.getPorts();
+    for (const port of ports) {
+        if (port.forget) {
+            await port.forget();
+        }
+    }
+    selectedPort = null;
   },
 
   // Flashing logic (Phase 3)
@@ -225,8 +247,13 @@ export const api = {
         if (!activeDevice) throw new Error("No USB device selected for DFU. Please click 'Add Device' to authorize.");
         return flash(activeDevice, data, flasherOptions);
     } else {
-        const activePort = selectedPort || (await (navigator as any).serial.getPorts()).find((p: any) => formatPortName(p) === options.port);
-        if (!activePort) throw new Error("No serial port selected. Please select a port first.");
+        // Robust Lookup: Use getUniquePorts to match strictly by the unique name selected in UI
+        const allPorts = await (navigator as any).serial.getPorts();
+        const uniquePorts = getUniquePorts(allPorts);
+        const match = uniquePorts.find(p => p.name === options.port);
+        const activePort = selectedPort || match?.port;
+
+        if (!activePort) throw new Error(`No serial port selected or found matching "${options.port}". Please select a port first.`);
         return flash(activePort, data, flasherOptions);
     }
   },
@@ -244,22 +271,74 @@ export const api = {
   },
 };
 
+// Helper to generate unique names for ports in order
+function getUniquePorts(ports: any[]): { name: string, port: any }[] {
+    const counts = new Map<string, number>();
+    const results: { name: string, port: any }[] = [];
+
+    for (const port of ports) {
+        const baseName = formatPortName(port);
+        let name = baseName;
+        
+        if (counts.has(baseName)) {
+            const count = counts.get(baseName)! + 1;
+            counts.set(baseName, count);
+            name = `${baseName} (${count})`;
+        } else {
+            // Check if there are future duplicates?
+            // Actually, we need to know if there ARE duplicates total to determine if we should number the first one.
+            // But simple sequential numbering (1), (2) is fine if we just start numbering from 2 or treat first as base?
+            // Standard practice: "Name", "Name (2)", "Name (3)".
+            // BUT if we want "Name (1)" to be explicit, we need two passes.
+            // Let's stick to valid distinct names.
+            // Actually, simply appending count if count > 0 is redundant for the first one usually.
+            // Simpler: Just count them.
+            counts.set(baseName, 1);
+        }
+        results.push({ name, port }); // This is WRONG, I need 2 passes to know if I should append (1)
+    }
+
+    // 2-pass approach for cleaner names
+    const frequency = new Map<string, number>();
+    for (const port of ports) frequency.set(formatPortName(port), (frequency.get(formatPortName(port)) || 0) + 1);
+
+    const currentCounts = new Map<string, number>();
+    return ports.map(port => {
+        const baseName = formatPortName(port);
+        const total = frequency.get(baseName) || 0;
+        
+        if (total > 1) {
+            const count = (currentCounts.get(baseName) || 0) + 1;
+            currentCounts.set(baseName, count);
+            return { name: `${baseName} (${count})`, port };
+        } else {
+            return { name: baseName, port };
+        }
+    });
+}
+
 function formatPortName(port: any): string {
   const info = port.getInfo();
+  
+  // Try to find any other properties
+  const extraKeys = Object.keys(info).filter(k => k !== 'usbVendorId' && k !== 'usbProductId');
+
   const vid = info.usbVendorId ? info.usbVendorId.toString(16).padStart(4, '0').toUpperCase() : '????';
   const pid = info.usbProductId ? info.usbProductId.toString(16).padStart(4, '0').toUpperCase() : '????';
   
-  let label = `Serial Port (${vid}:${pid})`;
+  let label = "Serial Device";
+  if (info.usbVendorId === 0x0483 && info.usbProductId === 0x5740) label = "EdgeTX/OpenTX";
+  else if (info.usbVendorId === 0x0483 && info.usbProductId === 0x374E) label = "ST-Link";
+  else if (info.usbVendorId === 0x1209) label = "ArduPilot";
   
-  if (info.usbVendorId === 0x0483 && info.usbProductId === 0x5740) {
-      label += " - EdgeTX/OpenTX";
-  } else if (info.usbVendorId === 0x0483 && info.usbProductId === 0x374E) {
-      label += " - ST-Link";
-  } else if (info.usbVendorId === 0x1209) {
-      label += " - ArduPilot";
+  // Construct a verbose label with all we have
+  let display = `${label} (VID:${vid} PID:${pid})`;
+  
+  if (extraKeys.length > 0) {
+      display += ` [${extraKeys.map(k => `${k}:${info[k]}`).join(' ')}]`;
   }
-  
-  return label;
+
+  return display;
 }
 
 function formatUSBName(device: any): string {

@@ -128,9 +128,10 @@ export function useSerialPorts(isPaused = false) {
     
     try {
       let result;
+      let newPort: string | null = null;
       if (request) {
         // Trigger browser picker
-        await api.requestPort(); 
+        newPort = await api.requestPort(); 
         // Then list all available ports
         result = await api.listPorts();
       } else {
@@ -149,14 +150,24 @@ export function useSerialPorts(isPaused = false) {
         return newPorts;
       });
       
+      // If we just added a new port, select it immediately
+      if (newPort && newPorts.includes(newPort)) {
+          setSelectedPort(newPort);
+          return;
+      }
+      
       // if selected port is no longer available, select first available
       setSelectedPort(prevSelected => {
-        if (prevSelected && !newPorts.includes(prevSelected)) {
-          return newPorts.length > 0 ? newPorts[0] : '';
-        } else if (newPorts.length > 0 && !prevSelected) {
-          return newPorts[0];
+        if (prevSelected && newPorts.includes(prevSelected)) {
+           return prevSelected;
         }
-        return prevSelected;
+
+        // Try to auto-select ArduPilot
+        const ardupilotPort = newPorts.find(p => p.includes('ArduPilot'));
+        if (ardupilotPort) return ardupilotPort;
+
+        // Fallback to first available
+        return newPorts.length > 0 ? newPorts[0] : '';
       });
     } catch (err) {
       console.error('Failed to list ports:', err);
@@ -183,12 +194,18 @@ export function useSerialPorts(isPaused = false) {
     return () => clearInterval(intervalId);
   }, [refreshPorts, isPaused]);
 
+  const forgetAll = useCallback(async () => {
+      await api.forgetAllPorts();
+      refreshPorts({ silent: true }); // Silent refresh to update list
+  }, [refreshPorts]);
+
   return {
     ports,
     selectedPort,
     setSelectedPort,
     isScanningPorts,
     refreshPorts,
+    forgetAll,
   };
 }
 

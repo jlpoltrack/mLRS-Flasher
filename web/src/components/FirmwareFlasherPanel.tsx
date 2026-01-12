@@ -339,30 +339,7 @@ function FirmwareFlasherPanel({
           <div className="form-group port-group full-width">
             <label>COM Port</label>
             <div className="port-row">
-              {selectedPort ? (
-                <>
-                  <div className="static-display">
-                    {selectedPort}
-                  </div>
-                  <button 
-                    className="btn-secondary" 
-                    onClick={() => {
-                        // If we want to allow switching to another existing port, we effectively
-                        // need to clear the selection or re-scan.
-                        // For DFU match, we just trigger refresh.
-                        // We also clear selection so they can see the dropdown if they cancel?
-                        // Actually, 'refreshPorts' with request:true opens the picker.
-                        // Let's just do that to match DFU.
-                        refreshPorts({ request: true });
-                    }}
-                    disabled={isFlashing || isScanningPorts}
-                  >
-                    Change Device
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="select-wrapper">
+                <div className="select-wrapper">
                     <select 
                       value={selectedPort} 
                       onChange={(e) => {
@@ -371,26 +348,23 @@ function FirmwareFlasherPanel({
                       }}
                       disabled={isFlashing || isScanningPorts}
                     >
-                      {isScanningPorts ? (
-                        <option>Scanning...</option>
-                      ) : ports.length === 0 ? (
-                        <option>No ports found</option>
+                      {ports.length === 0 ? (
+                        <option value="">No authorized devices</option>
                       ) : (
                         ports.map(port => (
                           <option key={port} value={port}>{port}</option>
                         ))
                       )}
                     </select>
-                  </div>
-                  <button 
-                    className="btn-success" 
-                    onClick={() => refreshPorts({ request: true })}
-                    disabled={isFlashing || isScanningPorts}
-                  >
-                    {isScanningPorts ? 'Scanning...' : 'Add Device'}
-                  </button>
-                </>
-              )}
+                </div>
+                <button 
+                className="btn-success" 
+                onClick={() => refreshPorts({ request: true })}
+                disabled={isFlashing || isScanningPorts}
+                title="Authorize a new serial device"
+                >
+                {isScanningPorts ? 'Scanning...' : 'Add Device'}
+                </button>
             </div>
           </div>
         )}

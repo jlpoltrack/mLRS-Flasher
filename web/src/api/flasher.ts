@@ -212,14 +212,26 @@ async function flashESP(
 
   onLog?.("Connecting to ESP device...");
   
+  // Ensure port is closed (so esptool can open it)
+  if (port.readable || port.writable) {
+      try {
+          // If the previous MAVLink connection was just disconnected, the port might still report readable
+          // We try to force close it to avoid 'Port already open' errors in esptool
+          await port.close(); 
+      } catch (e: any) {
+          // If close fails (e.g. locking), we log but proceed hoping esptool can handle it
+          onLog?.(`Warning: Port closure check: ${e.message}`);
+      }
+  }
+
   const transport = new Transport(port);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices (e.g. Bandit Wireless Bridge)
   // Also disable for AP Passthru as signals don't pass through FC
   if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
       onLog?.("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
-      transport.setDTR = async () => { await port.setSignals({ dataTerminalReady: false }); };
-      transport.setRTS = async () => { await port.setSignals({ requestToSend: false }); };
+      transport.setDTR = async () => { /* no-op */ };
+      transport.setRTS = async () => { /* no-op */ };
   }
   
   const esploader = new ESPLoader({
@@ -587,7 +599,7 @@ async function flashSTM32UART(
   options: FlasherOptions
 ): Promise<void> {
   const { onProgress, onLog } = options;
-  onLog?.("Starting STM32 UART flash (AN2606)...");
+  onLog?.("Starting STM32 UART flash...");
 
   let memoryBlocks: { address: number, data: Uint8Array }[] = [];
 
@@ -800,6 +812,9 @@ class Stm32UartProtocol {
 
         this.onLog?.("Flushing serial buffer...");
         this.flush();
+
+        // Wait a moment for bootloader to be ready (prevents initial timeout)
+        await new Promise(r => setTimeout(r, 1000));
 
         // Retry sync a few times
         for (let attempt = 1; attempt <= 3; attempt++) {
