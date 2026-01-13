@@ -1,20 +1,25 @@
 // @ts-ignore
-import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkPacket, minimal, common } from 'node-mavlink';
+import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkPacket, MavLinkPacketHeader, MavLinkProtocolV2, minimal, common } from 'node-mavlink';
 
 // ------------------------------------
-// Message Definitions (Minimal)
+// Message Definitions
 // ------------------------------------
-
-// We define minimal classes to avoid large dependencies if 'mavlink-mappings' isn't reliable.
-// However, since we are using node-mavlink, we should extend MavLinkData.
-
-
 
 // ------------------------------------
 // Constants
 // ------------------------------------
 const MAV_AUTOPILOT_ARDUPILOTMEGA = 3;
 const MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246;
+
+const MLRS_SYS_ID = 51;
+const MLRS_COMP_ID = 68;
+const MLRS_MAGIC_NUMBER = 1234321;
+
+// Registry of all known messages
+const REGISTRY: any = {
+    ...minimal.REGISTRY,
+    ...common.REGISTRY,
+};
 
 // ------------------------------------
 // MAVLink Connection Handler
@@ -58,7 +63,17 @@ class MavLinkConnection {
         }
         
         if (this.port.readable && this.port.writable) {
+            if (this.port.readable.locked) {
+                // If locked, we try to wait a moment or just fail gracefully 
+                // But generally this implies previous cleanup failed.
+                throw new Error("Port readable stream is already locked!");
+            }
             this.reader = this.port.readable.getReader();
+            
+            if (this.port.writable.locked) {
+                 this.reader.releaseLock();
+                 throw new Error("Port writable stream is already locked!");
+            }
             this.writer = this.port.writable.getWriter();
             this.startReadLoop();
         } else {
@@ -69,12 +84,22 @@ class MavLinkConnection {
     async disconnect() {
         this.readLoopActive = false;
         try {
-            await this.reader?.cancel();
-            this.reader?.releaseLock();
-            this.writer?.releaseLock();
+            if (this.reader) {
+                try {
+                    await this.reader.cancel();
+                } catch (e) {
+                    console.warn("Reader cancel warning:", e);
+                }
+                this.reader.releaseLock();
+                this.reader = null;
+            }
+            if (this.writer) {
+                this.writer.releaseLock();
+                this.writer = null;
+            }
             await this.port.close();
         } catch (e) {
-             console.error(e);
+             console.error("Disconnect error:", e);
         }
     }
 
@@ -85,7 +110,7 @@ class MavLinkConnection {
         if (!this.reader) return;
 
         try {
-            while (this.readLoopActive) {
+            while (this.readLoopActive && this.reader) {
                 const { value, done } = await this.reader.read();
                 if (done) break;
                 if (value) {
@@ -95,7 +120,10 @@ class MavLinkConnection {
                 }
             }
         } catch (e) {
-            console.error("Read loop error", e);
+            // Ignore errors on close/cancel
+            // console.error("Read loop error", e);
+        } finally {
+            this.readLoopActive = false;
         }
     }
 
@@ -108,7 +136,12 @@ class MavLinkConnection {
         });
 
         this.parser.on('data', (packet: MavLinkPacket) => {
-            // this.onLog?.(`[PARSER] Packet MsgID=${packet.header.msgid} SysID=${packet.header.sysid}`);
+            // Deserialization: Convert raw bytes to typed objects
+            const clazz = REGISTRY[packet.header.msgid];
+            if (clazz && packet.protocol) {
+                (packet as any).payload = packet.protocol.data(packet.payload, clazz);
+            }
+
             // Dispatch
             for (const listener of this.packetListeners) {
                 listener(packet);
@@ -116,44 +149,15 @@ class MavLinkConnection {
         });
     }
 
-    // Manual Packet Construction (since we don't have full generated classes)
-    // We will construct MavLinkPacket directly
-    async sendRawPacket(msgId: number, payload: Uint8Array, crcExtra: number) {
+    // New: Standard send using node-mavlink
+    async send(msg: MavLinkData) {
         if (!this.writer) return;
-        
-        const header = new Uint8Array(10);
-        const len = payload.length;
-        
-        header[0] = 0xFD; // STX v2
-        header[1] = len;
-        header[2] = 0; // incompat
-        header[3] = 0; // compat
-        header[4] = this.seq;
-        header[5] = this.mySysId;
-        header[6] = this.myCompId;
-        header[7] = msgId & 0xFF;
-        header[8] = (msgId >> 8) & 0xFF;
-        header[9] = (msgId >> 16) & 0xFF;
 
-        // Start CRC (X.25)
-        let crc = 0xffff;
-        const crcAccumulate = (data: number) => {
-             let tmp = data ^ (crc & 0xff);
-             tmp ^= (tmp << 4) & 0xff;
-             crc = (crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4);
-        };
+        // Use MavLinkProtocolV2 to serialize
+        const protocol = new MavLinkProtocolV2(this.mySysId, this.myCompId);
+        const buffer = protocol.serialize(msg, this.seq);
         
-        // CRC over header (excluding STX) + payload
-        for (let i = 1; i < 10; i++) crcAccumulate(header[i]);
-        for (let i = 0; i < len; i++) crcAccumulate(payload[i]);
-        crcAccumulate(crcExtra);
-
-        const fullPacket = new Uint8Array(10 + len + 2);
-        fullPacket.set(header, 0);
-        fullPacket.set(payload, 10);
-        fullPacket.set([crc & 0xFF, (crc >> 8) & 0xFF], 10 + len);
-
-        await this.writer.write(fullPacket);
+        await this.writer.write(buffer);
         this.seq = (this.seq + 1) % 256;
     }
 
@@ -181,57 +185,41 @@ class MavLinkConnection {
     // Helpers
     async waitForHeartbeat(timeoutMs = 10000): Promise<boolean> {
         this.onLog?.("wait for heartbeat...");
-        // We accept any heartbeat, but check if it's ArduPilot
-        const packet = await this.waitForPacket(0, timeoutMs);
+        const packet = await this.waitForPacket(0, timeoutMs); // 0 = HEARTBEAT
         if (packet) {
-            // Interpret payload manually
-            // custom_mode(4), type(1), autopilot(1), base_mode(1), system_status(1), mavlink_version(1)
-            const data = packet.payload;
-            const custom_mode = new DataView(data.buffer, data.byteOffset).getUint32(0, true);
-            const type = data[4];
-            const autopilot = data[5];
-            const base_mode = data[6];
-            const system_status = data[7];
-            const mavlink_version = data[8];
-            
-            this.onLog?.(`HEARTBEAT {type : ${type}, autopilot : ${autopilot}, base_mode : ${base_mode}, custom_mode : ${custom_mode}, system_status : ${system_status}, mavlink_version : ${mavlink_version}}`);
-            
-            if (autopilot === MAV_AUTOPILOT_ARDUPILOTMEGA) {
-                this.targetSysId = packet.header.sysid;
-                this.targetCompId = packet.header.compid;
-                return true;
+            if (packet.payload instanceof minimal.Heartbeat) {
+                 const hb = packet.payload as minimal.Heartbeat;
+                 this.onLog?.(`HEARTBEAT {type : ${hb.type}, autopilot : ${hb.autopilot}, base_mode : ${hb.baseMode}, custom_mode : ${hb.customMode}, system_status : ${hb.systemStatus}, mavlink_version : ${hb.mavlinkVersion}}`);
+                 
+                 if (hb.autopilot === MAV_AUTOPILOT_ARDUPILOTMEGA) {
+                    this.targetSysId = packet.header.sysid;
+                    this.targetCompId = packet.header.compid;
+                    return true;
+                 }
             }
         }
         return false;
     }
     
     async paramRead(paramId: string): Promise<number | null> {
-        // Request
-        // target_system, target_component, param_id(16), param_index(2)
-        const payload = new Uint8Array(20);
-        const view = new DataView(payload.buffer);
-        view.setInt16(0, -1, true); // index
-        payload[2] = this.targetSysId;
-        payload[3] = this.targetCompId;
-        const enc = new TextEncoder();
-        payload.set(enc.encode(paramId).slice(0, 16), 4);
+        const msg = new common.ParamRequestRead();
+        msg.paramIndex = -1;
+        msg.targetSystem = this.targetSysId;
+        msg.targetComponent = this.targetCompId;
+        msg.paramId = paramId; 
         
-        await this.sendRawPacket(20, payload, 214); // Msg 20, CRC 214
+        await this.send(msg);
         
         // Wait response
         const start = Date.now();
         while (Date.now() - start < 1500) {
-            const pkt = await this.waitForPacket(22, 500);
+            const pkt = await this.waitForPacket(22, 500); // PARAM_VALUE
             if (pkt) {
-                // val(4), count(2), index(2), id(16), type(1)
-                const data = pkt.payload;
-                const idBytes = data.subarray(8, 24); // 4+2+2=8
-                let nullIdx = idBytes.indexOf(0);
-                if (nullIdx === -1) nullIdx = 16;
-                const recId = new TextDecoder().decode(idBytes.subarray(0, nullIdx));
-                
-                if (recId === paramId) {
-                    return new DataView(data.buffer, data.byteOffset).getFloat32(0, true);
+                if (pkt.payload instanceof common.ParamValue) {
+                    const val = pkt.payload as common.ParamValue;
+                    if (val.paramId.replace(/\0/g, '') === paramId) {
+                        return val.paramValue;
+                    }
                 }
             }
         }
@@ -239,16 +227,15 @@ class MavLinkConnection {
     }
     
     async paramSet(paramId: string, value: number) {
-        // param_value(4), target_system, target_component, param_id(16), param_type(1)
-        const payload = new Uint8Array(23);
-        const view = new DataView(payload.buffer);
-        view.setFloat32(0, value, true);
-        payload[4] = this.targetSysId;
-        payload[5] = this.targetCompId;
-        payload.set(new TextEncoder().encode(paramId).slice(0, 16), 6);
-        payload[22] = 0; // type
+        const msg = new common.ParamSet();
+        msg.paramValue = value;
+        msg.targetSystem = this.targetSysId;
+        msg.targetComponent = this.targetCompId;
+        msg.paramId = paramId;
+        // @ts-ignore: Preserving previous behavior (type 0)
+        msg.paramType = 0; 
         
-        await this.sendRawPacket(23, payload, 168); // Msg 23, CRC 168
+        await this.send(msg);
         await this.waitForPacket(22, 500); // Wait for value confirmation
     }
     
@@ -257,11 +244,15 @@ class MavLinkConnection {
             let timeout: any;
             const listener = (packet: MavLinkPacket) => {
                  if (packet.header.msgid === 77) { // COMMAND_ACK
-                     const data = packet.payload;
-                     // command(2), result(1), progress(1), result_param2(4), target_sys(1), target_comp(1)
-                     const cmd = new DataView(data.buffer, data.byteOffset).getUint16(0, true);
-                     const resP2 = new DataView(data.buffer, data.byteOffset).getInt32(4, true);
+                     let cmd = 0;
+                     let resP2 = 0;
                      
+                     if (packet.payload instanceof common.CommandAck) {
+                         const ack = packet.payload as common.CommandAck;
+                         cmd = ack.command;
+                         resP2 = ack.resultParam2;
+                     }
+
                      if (cmd === expectedCmd && resP2 === magic) {
                          clearTimeout(timeout);
                          this.packetListeners = this.packetListeners.filter(l => l !== listener);
@@ -280,22 +271,20 @@ class MavLinkConnection {
     }
 
     async commandLong(cmd: number, p1=0, p2=0, p3=0, p4=0, p5=0, p6=0, p7=0, targetSys?: number, targetComp?: number, confirmation=0) {
-        // param1..7 (4*7=28), command(2), target_sys(1), target_comp(1), confirmation(1) -> 33 bytes
-        const payload = new Uint8Array(33);
-        const view = new DataView(payload.buffer);
-        view.setFloat32(0, p1, true);
-        view.setFloat32(4, p2, true);
-        view.setFloat32(8, p3, true);
-        view.setFloat32(12, p4, true);
-        view.setFloat32(16, p5, true);
-        view.setFloat32(20, p6, true);
-        view.setFloat32(24, p7, true);
-        view.setUint16(28, cmd, true);
-        payload[30] = targetSys ?? this.targetSysId;
-        payload[31] = targetComp ?? this.targetCompId;
-        payload[32] = confirmation;
+        const msg = new common.CommandLong();
+        // Helper to set params to avoid excessive TS ignores
+        const setParams = (m: any) => {
+             m._param1 = p1; m._param2 = p2; m._param3 = p3; m._param4 = p4;
+             m._param5 = p5; m._param6 = p6; m._param7 = p7;
+        };
+        setParams(msg);
         
-        await this.sendRawPacket(76, payload, 152); // Msg 76, CRC 152
+        msg.command = cmd;
+        msg.targetSystem = targetSys ?? this.targetSysId;
+        msg.targetComponent = targetComp ?? this.targetCompId;
+        msg.confirmation = confirmation;
+        
+        await this.send(msg);
     }
 }
 
@@ -322,7 +311,7 @@ export async function initApPassthrough(
     const targetPid = info.usbProductId;
 
     onLog?.("------------------------------------------------------------");
-    onLog?.(`AP Passthru (Strict MAVLink 2.0) - ${passthroughSerialStr}`);
+    onLog?.(`AP Passthru - ${passthroughSerialStr}`);
     onLog?.("------------------------------------------------------------");
     
     let mav: MavLinkConnection | null = null;
@@ -522,23 +511,22 @@ export async function initApPassthrough(
         // ---------------------------------------------------------
         // Post-Setup (Bootloader Trigger) - mlrs_put_into_systemboot
         // ---------------------------------------------------------
-        const mLRS_SysID = 51;
-        const mLRS_CompID = 68;
-        const magic = 1234321; 
+ 
 
         onLog?.("check connection to mLRS receiver...");
         // Step 1: Probe/Ping (Conf=0, Action=0)
         let ack = false;
-        for (let i = 0; i < 5; i++) {
-             await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 0, 0, 0, mLRS_CompID, 0, 0, magic, mLRS_SysID, mLRS_CompID, 0);
-             if (await mav.waitForMwAck(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, magic, 500)) {
+        // Try 3 times (reduced from 5 to save time if ACKs are missing)
+        for (let i = 0; i < 3; i++) {
+             await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 0, 0, 0, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 0);
+             if (await mav.waitForMwAck(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, MLRS_MAGIC_NUMBER, 500)) {
                  ack = true;
                  break;
              }
-             onLog?.("  send probe"); 
+             onLog?.(`  Probe retry ${i+1}...`); 
         }
         if (!ack) {
-             onLog?.("Sorry, something went wrong.");
+             onLog?.("No response to probe. Attempting to proceed...");
         } else {
              onLog?.("mLRS receiver connected");
         }
@@ -547,25 +535,25 @@ export async function initApPassthrough(
         onLog?.("arm mLRS receiver for reboot shutdown...");
         ack = false;
         for (let i = 0; i < 3; i++) {
-             await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 1, 0, 3, mLRS_CompID, 0, 0, magic, mLRS_SysID, mLRS_CompID, 1);
-             if (await mav.waitForMwAck(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, magic, 500)) {
+             await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 1, 0, 3, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 1);
+             if (await mav.waitForMwAck(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, MLRS_MAGIC_NUMBER, 500)) {
                  ack = true;
                  break;
              }
-             // onLog?.("Retry Arm..."); // Python doesn't seem to retry arm in logs or uses "send probe" text? 
+             // onLog?.("Retry Arm..."); 
         }
-        if (!ack) onLog?.("Sorry, something went wrong.");
+        if (!ack) onLog?.("No response to arm command. Proceeding...");
         else onLog?.("mLRS receiver armed for reboot shutdown");
 
         // Step 3: Execute (Conf=2, Action=3)
         onLog?.("mLRS receiver reboot shutdown...");
-        await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 2, 0, 3, mLRS_CompID, 0, 0, magic, mLRS_SysID, mLRS_CompID, 2);
+        await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 2, 0, 3, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 2);
         
         onLog?.("mLRS receiver reboot shutdown DONE");
         onLog?.("mLRS receiver jumps to system bootloader in 5 seconds");
 
         // Wait minor delay for reboot
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 1000));
 
         onLog?.("PASSTHROUGH READY FOR PROGRAMMING TOOL");
         return { port: activePort, baudRate: receiverBaud };
