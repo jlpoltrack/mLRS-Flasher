@@ -2,6 +2,8 @@ import { ESPLoader, Transport } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
 import { initApPassthrough } from './apPassthru';
+import { FlasherStateMachine } from './flasherStateMachine';
+
 
 const resolveAssetPath = (path: string) => {
   const base = import.meta.env.BASE_URL || '/';
@@ -208,28 +210,25 @@ async function flashESP(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { baud = 921600, erase, onProgress, onLog, filename, reset, flashMethod } = options;
+  const sm = new FlasherStateMachine(options.onProgress, options.onLog);
+  const { baud = 921600, erase, filename, reset, flashMethod } = options;
 
-  onLog?.("Connecting to ESP device...");
+  sm.transition('CONNECTING', "Connecting to ESP device...");
   
   // Ensure port is closed (so esptool can open it)
   if (port.readable || port.writable) {
       try {
-          // If the previous MAVLink connection was just disconnected, the port might still report readable
-          // We try to force close it to avoid 'Port already open' errors in esptool
           await port.close(); 
       } catch (e: any) {
-          // If close fails (e.g. locking), we log but proceed hoping esptool can handle it
-          onLog?.(`Warning: Port closure check: ${e.message}`);
+          sm.log(`Warning: Port closure check: ${e.message}`);
       }
   }
 
   const transport = new Transport(port);
 
-  // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices (e.g. Bandit Wireless Bridge)
-  // Also disable for AP Passthru as signals don't pass through FC
+  // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
   if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
-      onLog?.("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
+      sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };
   }
@@ -239,22 +238,22 @@ async function flashESP(
     baudrate: baud,
     terminal: {
         clean: () => {},
-        writeLine: (data: string) => onLog?.(data),
-        write: (data: string) => onLog?.(data),
+        writeLine: (data: string) => sm.log(data),
+        write: (data: string) => sm.log(data),
     },
     romBaudrate: 115200,
   });
 
   try {
     const chipName = await esploader.main();
-    onLog?.(`Detected chip: ${chipName}`);
+    sm.log(`Detected chip: ${chipName}`);
 
     if (erase === 'full_erase') {
-        onLog?.("Performing full erase...");
+        sm.transition('ERASING', "Performing full erase...");
         await esploader.eraseFlash();
     }
 
-    onLog?.("Preparing firmware files...");
+    sm.log("Preparing firmware files...");
     // SAFE CONVERSION: Manual loop to preserve 0x80-0x9F
     let firmwareStr = "";
     const firmwareBytes = new Uint8Array(firmwareData);
@@ -305,7 +304,6 @@ async function flashESP(
                 const match = filename.match(/v(\d+)\.(\d+)\.(\d+)/);
                 if (match) {
                     const [_, major, minor, patch] = match.map(Number);
-                    // >= 1.3.7 uses 80qio
                     if (major > 1 || (major === 1 && minor > 3) || (major === 1 && minor === 3 && patch >= 7)) {
                         bootloaderFile = 'bootloader_80qio.bin';
                     }
@@ -314,7 +312,7 @@ async function flashESP(
             bootloaderPath = resolveAssetPath(`/assets/esp32/${bootloaderFile}`);
         }
 
-        onLog?.(`Downloading auxiliary files for ${cleanChip}...`);
+        sm.log(`Downloading auxiliary files for ${cleanChip}...`);
         const bootloader = await fetchBinary(bootloaderPath);
         const partitions = await fetchBinary(partitionsPath);
         const bootApp = await fetchBinary(bootAppPath);
@@ -329,7 +327,7 @@ async function flashESP(
          fileArray = [{ data: firmwareStr, address: 0x0 }];
     }
 
-    onLog?.("Writing flash...");
+    sm.transition('WRITING', "Writing flash...");
     const flashOptions = {
         fileArray,
         flashSize,
@@ -339,9 +337,9 @@ async function flashESP(
         compress: true,
     };
     
-    onLog?.(`Flash Params: Mode=${flashOptions.flashMode}, Freq=${flashOptions.flashFreq}, Size=${flashOptions.flashSize}, Compress=${flashOptions.compress}`);
+    sm.log(`Flash Params: Mode=${flashOptions.flashMode}, Freq=${flashOptions.flashFreq}, Size=${flashOptions.flashSize}, Compress=${flashOptions.compress}`);
     for (const file of fileArray) {
-        onLog?.(`Writing ${file.data.length} bytes to 0x${file.address.toString(16)}`);
+        sm.log(`Writing ${file.data.length} bytes to 0x${file.address.toString(16)}`);
     }
 
     await esploader.writeFlash({
@@ -349,24 +347,23 @@ async function flashESP(
         calculateMD5Hash: (_data: any) => "",
         reportProgress: (_fileIndex: number, written: number, total: number) => {
             const progress = Math.round((written / total) * 100);
-            onProgress?.(progress, `Writing: ${progress}%`);
+            sm.updateProgress(progress);
         }
     } as any);
 
-    onLog?.("Flash complete!");
-    onLog?.("Resetting device...");
+    sm.transition('RESETTING', "Flash complete! Resetting device...");
     
-    // Manual Reset Sequence:
-    // RTS (EN) low = Reset active
-    // DTR (IO0) high = Boot mode (keep high to ensure it doesn't go to bootloader)
-    await transport.setDTR(false); // DTR low = IO0 high (pull-up)
-    await transport.setRTS(true);  // RTS high = EN low (reset)
+    // Manual Reset Sequence
+    await transport.setDTR(false);
+    await transport.setRTS(true);
     await new Promise(r => setTimeout(r, 100));
-    await transport.setRTS(false); // RTS low = EN high (run)
+    await transport.setRTS(false);
     
     await transport.disconnect();
+    
+    sm.transition('DONE');
   } catch (err: any) {
-    onLog?.(`Error during ESP flash: ${err.message}`);
+    sm.transition('ERROR', `Error during ESP flash: ${err.message}`);
     throw err;
   }
 }
@@ -376,14 +373,12 @@ async function flashSTM32DFU(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { onProgress, onLog } = options;
-  onLog?.("Starting STM32 DFU flash...");
+  const sm = new FlasherStateMachine(options.onProgress, options.onLog);
+  sm.transition('CONNECTING', "Starting STM32 DFU flash...");
   
   let binaryData = firmwareData;
   if (options.filename?.toLowerCase().endsWith('.hex')) {
-      onLog?.("Converting Intel HEX to binary...");
-      
-      onLog?.("Converting Intel HEX to binary...");
+      sm.log("Converting Intel HEX to binary...");
       const decoder = new TextDecoder('utf-8');
       const hexString = decoder.decode(firmwareData);
       
@@ -406,7 +401,7 @@ async function flashSTM32DFU(
           }
 
           binaryData = combined.buffer;
-          onLog?.(`HEX converted: ${binaryData.byteLength} bytes from ${blocks.length} block(s)`);
+          sm.log(`HEX converted: ${binaryData.byteLength} bytes from ${blocks.length} block(s)`);
       } catch (e: any) {
           throw new Error(`Failed to parse HEX file: ${e.message}`);
       }
@@ -423,7 +418,7 @@ async function flashSTM32DFU(
     
     // 1b. Fix interface names if they are null (mimics fixInterfaceNames from reference)
     if (interfaces.some((intf: any) => intf.name === null)) {
-        onLog?.("Reading interface names from device descriptors...");
+        sm.log("Reading interface names from device descriptors...");
         const tempDevice = new DFU.Device(device, interfaces[0]);
         await tempDevice.device_.open();
         await tempDevice.device_.selectConfiguration(1);
@@ -450,7 +445,7 @@ async function flashSTM32DFU(
             settings = flashInterface;
         }
     }
-    onLog?.(`Found DFU interface: ${settings.name || 'Unnamed'} (Alt ${settings.alternate.alternateSetting})`);
+    sm.log(`Found DFU interface: ${settings.name || 'Unnamed'} (Alt ${settings.alternate.alternateSetting})`);
 
     // 3. Create initial DFU device instance to read descriptors
     let dfu: InstanceType<typeof DFU.Device> | InstanceType<typeof DFUse.Device> = new DFU.Device(device, settings);
@@ -459,32 +454,35 @@ async function flashSTM32DFU(
     let lastLoggedProgress = 0;
     const setupLogging = (dev: any) => {
         dev.logDebug = (msg: string) => console.debug(msg);
-        dev.logInfo = (msg: string) => onLog?.(msg);
-        dev.logWarning = (msg: string) => onLog?.(`Warning: ${msg}`);
-        dev.logError = (msg: string) => onLog?.(`Error: ${msg}`);
+        dev.logInfo = (msg: string) => sm.log(msg);
+        dev.logWarning = (msg: string) => sm.log(`Warning: ${msg}`);
+        dev.logError = (msg: string) => sm.log(`Error: ${msg}`);
         dev.logProgress = (done: number, total: number) => {
             if (total) {
                 const progress = Math.round((done / total) * 100);
-                onProgress?.(progress, `Flash: ${progress}%`);
+                sm.updateProgress(progress);
                 
                 // Reset tracker if a new operation starts (progress drops)
                 if (progress < lastLoggedProgress) {
                     lastLoggedProgress = 0;
+                    // Try to infer state from progress movement (heuristic)
+                    // Usually this means we started writing after erase, or verifying
+                    if (sm['state'] === 'ERASING') sm.transition('WRITING');
                 }
 
                 // Log every 10% (when the 10s digit changes) or at 100%
                 if (progress === 100 || Math.floor(progress / 10) > Math.floor(lastLoggedProgress / 10)) {
-                    onLog?.(`Progress: ${progress}%`);
+                    sm.log(`Progress: ${progress}%`);
                     lastLoggedProgress = progress;
                 }
             } else {
-                 onProgress?.(0, `Flash: ${done} bytes`);
+                sm.updateProgress(0, `Flash: ${done} bytes`);
             }
         };
     };
     setupLogging(dfu);
 
-    onLog?.("Opening DFU device...");
+    sm.log("Opening DFU device...");
     await dfu.open();
     
     // 5. Determine DFU version and Manifestation Tolerance from Descriptor
@@ -519,16 +517,16 @@ async function flashSTM32DFU(
             if (funcDesc.bcdDFUVersion !== undefined) {
                 dfuVersion = funcDesc.bcdDFUVersion;
             }
-            onLog?.(`DFU Descriptor: Version=0x${dfuVersion.toString(16)}, ManifestationTolerant=${manifestationTolerant}, TransferSize=${transferSize}`);
+            sm.log(`DFU Descriptor: Version=0x${dfuVersion.toString(16)}, ManifestationTolerant=${manifestationTolerant}, TransferSize=${transferSize}`);
         }
         
     } catch (error) {
-         onLog?.(`Warning: Failed to read DFU descriptor. Error: ${error}`);
+         sm.log(`Warning: Failed to read DFU descriptor. Error: ${error}`);
     }
 
     // 6. If DFU version is 0x011a (DFuSe) and in DFU mode, switch to DFUse.Device
     if (dfuVersion === 0x011a && settings.alternate.interfaceProtocol === 0x02) {
-        onLog?.("DFuSe protocol detected. Switching to DFUse device...");
+        sm.log("DFuSe protocol detected. Switching to DFUse device...");
         await dfu.close();
         dfu = new DFUse.Device(device, settings);
         setupLogging(dfu);
@@ -537,27 +535,30 @@ async function flashSTM32DFU(
         // Check memory info and set start address
         const dfuseDevice = dfu as InstanceType<typeof DFUse.Device>;
         if (dfuseDevice.memoryInfo) {
-            onLog?.(`Memory: ${dfuseDevice.memoryInfo.name}`);
+            sm.log(`Memory: ${dfuseDevice.memoryInfo.name}`);
             let totalSize = 0;
             for (let segment of dfuseDevice.memoryInfo.segments) {
                 totalSize += segment.end - segment.start;
             }
-            onLog?.(`Total writable: ${(totalSize / 1024).toFixed(1)} KB`);
+            sm.log(`Total writable: ${(totalSize / 1024).toFixed(1)} KB`);
             
             // Set start address to first writable segment to avoid "inferred" warning
             const firstWritable = dfuseDevice.memoryInfo.segments.find(s => s.writable);
             if (firstWritable) {
                 dfuseDevice.startAddress = firstWritable.start;
-                onLog?.(`Start address: 0x${firstWritable.start.toString(16)}`);
+                sm.log(`Start address: 0x${firstWritable.start.toString(16)}`);
             }
         } else {
-            onLog?.("Warning: No memory info parsed from interface name.");
+            sm.log("Warning: No memory info parsed from interface name.");
         }
     }
 
-    onLog?.("DFU connected. Beginning firmware download...");
+    sm.transition('ERASING', "DFU connected. Beginning firmware download...");
     
     // do_download handles the whole process including manifestation
+    // It does Erase -> Write -> Verify (if implemented)
+    // We don't have fine-grained control over "Erase" vs "Write" in do_download 
+    // without implementing it manually, but webdfu's logProgress will fire.
     try {
         await dfu.do_download(transferSize, binaryData, manifestationTolerant);
     } catch (error: any) {
@@ -568,13 +569,13 @@ async function flashSTM32DFU(
             error.message.includes("The device was disconnected") ||
             error.message.includes("Device unavailable")
         )) {
-            onLog?.("Device reset successfully (connection lost as expected).");
+            sm.log("Device reset successfully (connection lost as expected).");
         } else {
             throw error;
         }
     }
 
-    onLog?.("STM32 DFU Flash complete!");
+    sm.transition('DONE', "STM32 DFU Flash complete!");
     
     // Attempt closure if still connected
     try {
@@ -582,7 +583,7 @@ async function flashSTM32DFU(
     } catch (e) { /* ignore */ }
     
   } catch (err: any) {
-    onLog?.(`Error during STM32 DFU flash: ${err.message}`);
+    sm.transition('ERROR', `Error during STM32 DFU flash: ${err.message}`);
     throw err;
   }
 }
@@ -592,20 +593,20 @@ async function flashSTM32UART(
   firmwareData: ArrayBuffer,
   options: FlasherOptions
 ): Promise<void> {
-  const { onProgress, onLog } = options;
-  onLog?.("Starting STM32 UART flash...");
+  const sm = new FlasherStateMachine(options.onProgress, options.onLog);
+  sm.transition('CONNECTING', "Starting STM32 UART flash...");
 
   let memoryBlocks: { address: number, data: Uint8Array }[] = [];
 
   if (options.filename?.toLowerCase().endsWith('.hex')) {
-      onLog?.("Converting Intel HEX to binary blocks...");
+      sm.log("Converting Intel HEX to binary blocks...");
       const decoder = new TextDecoder();
       const hexText = decoder.decode(firmwareData);
       
       try {
           memoryBlocks = parseHex(hexText);
           let totalBytes = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
-          onLog?.(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
+          sm.log(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
       } catch (e: any) {
           throw new Error(`Failed to parse HEX file: ${e.message}`);
       }
@@ -615,16 +616,17 @@ async function flashSTM32UART(
       memoryBlocks.push({ address: 0x08000000, data: new Uint8Array(firmwareData) });
   }
   
-  const protocol = new Stm32UartProtocol(port, onLog);
+  const protocol = new Stm32UartProtocol(port, (msg) => sm.log(msg));
   try {
     await protocol.connect();
-    onLog?.("Connected to STM32 bootloader.");
+    sm.log("Connected to STM32 bootloader.");
 
+    sm.transition('SYNCING');
     const info = await protocol.get();
-    onLog?.(`Bootloader version: ${info.version.toString(16)}`);
+    sm.log(`Bootloader version: ${info.version.toString(16)}`);
 
     const chipId = await protocol.getId();
-    onLog?.(`Chip ID: 0x${chipId.toString(16)}`);
+    sm.log(`Chip ID: 0x${chipId.toString(16)}`);
 
     // Determine page size and erase necessary pages
     const CHIP_PAGE_SIZES: Record<number, number> = {
@@ -640,12 +642,12 @@ async function flashSTM32UART(
 
     const pageSize = CHIP_PAGE_SIZES[chipId] || 2048; // Default to 2KB if unknown
     if (!CHIP_PAGE_SIZES[chipId]) {
-        onLog?.(`Warning: Unknown Chip ID 0x${chipId.toString(16)}. Assuming 2KB page size.`);
+        sm.log(`Warning: Unknown Chip ID 0x${chipId.toString(16)}. Assuming 2KB page size.`);
     } else {
-        onLog?.(`Detected Page Size: ${pageSize} bytes`);
+        sm.log(`Detected Page Size: ${pageSize} bytes`);
     }
 
-    onLog?.("Calculating pages to erase...");
+    sm.transition('ERASING', "Calculating pages to erase...");
     
     // Calculate unique pages
     const pagesToErase = new Set<number>();
@@ -669,20 +671,20 @@ async function flashSTM32UART(
     
     const sortedPages = Array.from(pagesToErase).sort((a, b) => a - b);
     if (sortedPages.length === 0) {
-        onLog?.("Warning: No flash pages found to erase (maybe writing to RAM?). Skipping erase.");
+        sm.log("Warning: No flash pages found to erase (maybe writing to RAM?). Skipping erase.");
     } else {
-        onLog?.(`Erasing ${sortedPages.length} pages: ${sortedPages.join(', ')}...`);
+        sm.log(`Erasing ${sortedPages.length} pages: ${sortedPages.join(', ')}...`);
         await protocol.erasePages(sortedPages);
     }
 
-    onLog?.("Writing firmware...");
+    sm.transition('WRITING');
     
     let totalSize = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
     let totalWritten = 0;
     let lastLogBytes = 0;
 
     for (const block of memoryBlocks) {
-        onLog?.(`Writing block at 0x${block.address.toString(16)} (${block.data.length} bytes)...`);
+        sm.log(`Writing block at 0x${block.address.toString(16)} (${block.data.length} bytes)...`);
         
         const data = block.data;
         const len = data.length;
@@ -700,21 +702,21 @@ async function flashSTM32UART(
             totalWritten += currentChunkSize;
             
             const progress = Math.round((totalWritten / totalSize) * 100);
-            onProgress?.(progress, `Writing: ${progress}%`);
+            sm.updateProgress(progress);
 
             // Log progress every 10KB
             if (totalWritten - lastLogBytes >= 10240) {
-                onLog?.(`Written ${Math.floor(totalWritten / 1024)} KB...`);
+                sm.log(`Written ${Math.floor(totalWritten / 1024)} KB...`);
                 lastLogBytes = totalWritten;
             }
         }
     }
 
-    onLog?.("STM32 UART Flash complete!");
+    sm.transition('DONE', "STM32 UART Flash complete!");
   } catch (err: any) {
-    onLog?.(`Error during STM32 UART flash: ${err.message}`);
+    sm.transition('ERROR', `Error during STM32 UART flash: ${err.message}`);
     if (err.message.includes("no ACK") || err.message.includes("timeout")) {
-        onLog?.("Hint: Check your connections and ensure the device is in bootloader mode.");
+        sm.log("Hint: Check your connections and ensure the device is in bootloader mode.");
     }
     throw err;
   } finally {
