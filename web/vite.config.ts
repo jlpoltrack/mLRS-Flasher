@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [
     react(),
     nodePolyfills({
-      include: ['buffer', 'stream', 'events', 'util', 'process'],
+      include: ['buffer', 'stream', 'events', 'util', 'process', 'timers'],
       globals: {
         Buffer: true,
         global: true,
@@ -18,23 +18,5 @@ export default defineConfig({
   ],
   build: {
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('node-mavlink') || id.includes('mavlink-mappings') || id.includes('xml2js')) {
-              return 'mavlink';
-            }
-            if (id.includes('react') || id.includes('react-dom') || id.includes('lucide-react')) {
-              return 'react-vendor';
-            }
-            if (id.includes('vite-plugin-node-polyfills') || id.includes('node-stdlib-browser')) {
-              return 'polyfills';
-            }
-            return 'vendor';
-          }
-        },
-      },
-    },
   },
 })
