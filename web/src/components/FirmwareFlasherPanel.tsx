@@ -202,6 +202,7 @@ function FirmwareFlasherPanel({
   }, [metadata, selectedVersion, selectedDevice, selectedPort, onFlash, targetType, setError]);
 
   const isDevVersion = selectedVersion?.includes('dev');
+  const isFrSkyR9 = selectedDevice?.includes('FrSky R9');
 
   return (
     <div className="panel">
@@ -335,7 +336,7 @@ function FirmwareFlasherPanel({
 
         {/* COM port selection */}
         {/* FIX: Now shown for appassthru as well */}
-        {(metadata?.needsPort || flashMethod === 'uart' || flashMethod === 'esptool' || flashMethod === 'appassthru') && (
+        {(metadata?.needsPort || flashMethod === 'uart' || flashMethod === 'esptool' || flashMethod === 'appassthru') && !isFrSkyR9 && (
           <div className="form-group port-group full-width">
             <label>COM Port</label>
             <div className="port-row">
@@ -449,7 +450,7 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {flashMethod === 'stlink' && (
+      {flashMethod === 'stlink' && !isFrSkyR9 && (
         <div className="external-flash-card">
               <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -482,8 +483,76 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
+      {isFrSkyR9 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+          {/* Option 1: ELRS Bootloader */}
+          <div className="external-flash-card" style={{ marginTop: 0 }}>
+              <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
+                    <div>
+                      <div className="flash-card-title">Option 1: ELRS Bootloader</div>
+                      <div className="flash-card-desc">.elrs files can be flashed using the radio if the ELRS bootloader has been installed on the Tx module</div>
+                    </div>
+                </div>
+                <a 
+                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
+                    download={selectedFile}
+                    className="btn-download"
+                >
+                    Download Firmware
+                </a>
+              </div>
+
+              <div className="flash-steps" style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
+                 <div className="flash-step">
+                  <span>Download the .elrs firmware file</span>
+                </div>
+                 <div className="flash-step">
+                  <span>Copy the file to the SD Card of your radio and place it in the firmware folder</span>
+                </div>
+                 <div className="flash-step">
+                  <span>Flash the module by navigating to the firmware folder, selecting the .elrs file and clicking 'Flash external module'</span>
+                </div>
+              </div>
+          </div>
+
+          {/* Option 2: STLink/SWD */}
+          <div className="external-flash-card" style={{ marginTop: 0 }}>
+              <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="flash-card-icon">⚡</div>
+                    <div>
+                      <div className="flash-card-title">Option 2: STLink / SWD</div>
+                      <div className="flash-card-desc">Standard method using STLink adapter</div>
+                    </div>
+                </div>
+                <a 
+                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
+                    download={selectedFile}
+                    className="btn-download"
+                >
+                    Download Firmware
+                </a>
+              </div>
+
+              <div className="flash-steps">
+                <div className="flash-step">
+                  <span>Download the .hex firmware file</span>
+                </div>
+                <div className="flash-step">
+                  <span>Connect STLink adapter to module's SWD pins</span>
+                </div>
+                <div className="flash-step">
+                  <span>Use STM32CubeProgrammer to flash</span>
+                </div>
+              </div>
+          </div>
+        </div>
+      )}
+
       <div className="button-row">
-        {flashMethod !== 'stlink' && (
+        {flashMethod !== 'stlink' && !isFrSkyR9 && (
             <button 
             className="btn-primary btn-flash"
             onClick={handleFlash}

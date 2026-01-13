@@ -18,6 +18,7 @@ export const g_receiverDeviceTypeDict: Record<string, any> = {
     'BetaFPV' :        { 'fname' : 'rx-betafpv',     'chipset' : 'esp32' },
     'Bayck' :          { 'fname' : 'rx-bayck',       'chipset' : 'esp8285' },
     'SpeedyBee' :      { 'fname' : 'rx-speedybee',   'chipset' : 'esp8285' },
+    'FlySky Radio' :   { 'fname' : 'rx-flysky',      'chipset' : 'esp32s3' },
     'ELRS Generic' :   { 'fname' : 'rx-generic',     'chipset' : 'espxx' },
 };
 
@@ -161,6 +162,14 @@ export const g_targetDict: Record<string, any> = {
         'chipset' : 'esp8285',
         'flashmethod' : 'esptool,appassthru',
         'description' : description_esp_esptool_uart_default + description_ap_passthru_default,
+    },
+    'rx-flysky' : {
+        'chipset' : 'esp32s3',
+        'flashmethod' : 'esptool,appassthru',
+        'description' : description_esp_esptool_uart_default + description_ap_passthru_default,
+        'rx-flysky-pr02-2400' : {
+            'chipset' : 'esp32s3',
+        },
     },
     'rx-generic' : {
         'flashmethod' : 'esptool,appassthru',
