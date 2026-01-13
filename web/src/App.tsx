@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import Navigation from './components/Navigation';
-import DeviceView from './components/DeviceView';
-import LuaScript from './components/LuaScript';
 import Console from './components/Console';
 import UpdateBanner from './components/UpdateBanner';
 import { TargetType, LogType } from './constants';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
 import type { LogEntry, Version } from './types';
+
+const DeviceView = lazy(() => import('./components/DeviceView'));
+const LuaScript = lazy(() => import('./components/LuaScript'));
 
 
 function App() {
@@ -145,52 +146,58 @@ function App() {
       );
     }
 
-    switch (activeTab) {
-      case 'tx_ext':
-        return (
-          <DeviceView 
-            targetType={TargetType.TxExternal}
-            versions={versions} 
-            devices={devices.tx} 
-            onFlash={handleFlash}
-            isFlashing={isFlashing}
-            flashTarget={flashTarget}
-            progress={progress}
-          />
-        );
-      case 'receiver':
-        return (
-          <DeviceView 
-            targetType={TargetType.Receiver}
-            versions={versions} 
-            devices={devices.rx} 
-            onFlash={handleFlash}
-            isFlashing={isFlashing}
-            flashTarget={flashTarget}
-            progress={progress}
-          />
-        );
-      case 'tx_int':
-        return (
-          <DeviceView 
-            targetType={TargetType.TxInternal}
-            versions={versions} 
-            devices={devices.txint} 
-            onFlash={handleFlash}
-            isFlashing={isFlashing}
-            flashTarget={flashTarget}
-            progress={progress}
-          />
-        );
-      case 'lua':
-        return (
-          <LuaScript 
-            versions={versions}
-          />
-        );
-      default:
-        return null;
-    }
+    return (
+      <Suspense fallback={<div className="loading"><div className="spinner"></div><p>Loading component...</p></div>}>
+        {(() => {
+          switch (activeTab) {
+            case 'tx_ext':
+              return (
+                <DeviceView 
+                  targetType={TargetType.TxExternal}
+                  versions={versions} 
+                  devices={devices.tx} 
+                  onFlash={handleFlash}
+                  isFlashing={isFlashing}
+                  flashTarget={flashTarget}
+                  progress={progress}
+                />
+              );
+            case 'receiver':
+              return (
+                <DeviceView 
+                  targetType={TargetType.Receiver}
+                  versions={versions} 
+                  devices={devices.rx} 
+                  onFlash={handleFlash}
+                  isFlashing={isFlashing}
+                  flashTarget={flashTarget}
+                  progress={progress}
+                />
+              );
+            case 'tx_int':
+              return (
+                <DeviceView 
+                  targetType={TargetType.TxInternal}
+                  versions={versions} 
+                  devices={devices.txint} 
+                  onFlash={handleFlash}
+                  isFlashing={isFlashing}
+                  flashTarget={flashTarget}
+                  progress={progress}
+                />
+              );
+            case 'lua':
+              return (
+                <LuaScript 
+                  versions={versions}
+                />
+              );
+            default:
+              return null;
+          }
+        })()}
+      </Suspense>
+    );
   };
 
   return (

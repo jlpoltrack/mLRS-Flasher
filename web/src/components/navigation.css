@@ -55,7 +55,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-size: 13px; /* Smaller font */
+  font-size: 15px; /* Larger font */
   font-weight: 500;
   display: flex;
   align-items: center;

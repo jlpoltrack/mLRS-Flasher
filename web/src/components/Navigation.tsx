@@ -9,10 +9,10 @@ interface NavigationProps {
 
 function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const tabs = [
-    { id: 'tx_ext', label: 'Tx Module (External)', icon: <Radio size={18} /> },
-    { id: 'receiver', label: 'Receiver', icon: <Cpu size={18} /> },
-    { id: 'tx_int', label: 'Tx Module (Internal)', icon: <Radio size={18} /> },
-    { id: 'lua', label: 'Lua Script', icon: <FileCode size={18} /> },
+    { id: 'tx_ext', label: 'Tx Module (External)', icon: <Radio size={20} /> },
+    { id: 'receiver', label: 'Receiver', icon: <Cpu size={20} /> },
+    { id: 'tx_int', label: 'Tx Module (Internal)', icon: <Radio size={20} /> },
+    { id: 'lua', label: 'Lua Script', icon: <FileCode size={20} /> },
   ];
 
   return (
