@@ -712,6 +712,44 @@ async function flashSTM32UART(
         }
     }
 
+    sm.transition('VERIFYING', "Verifying flashed data...");
+    totalWritten = 0; // Reset counter for verification phase
+    lastLogBytes = 0;
+
+    for (const block of memoryBlocks) {
+        sm.log(`Verifying block at 0x${block.address.toString(16)} (${block.data.length} bytes)...`);
+        
+        const data = block.data;
+        const len = data.length;
+        let verified = 0;
+        const chunkSize = 256;
+
+        while (verified < len) {
+            const remaining = len - verified;
+            const currentChunkSize = Math.min(remaining, chunkSize);
+            
+            const readBack = await protocol.readMemory(block.address + verified, currentChunkSize);
+            
+            // Compare
+            for (let i = 0; i < currentChunkSize; i++) {
+                if (readBack[i] !== data[verified + i]) {
+                    throw new Error(`Verification failed at 0x${(block.address + verified + i).toString(16)}: expected 0x${data[verified + i].toString(16)}, got 0x${readBack[i].toString(16)}`);
+                }
+            }
+            
+            verified += currentChunkSize;
+            totalWritten += currentChunkSize;
+            
+            const progress = Math.round((totalWritten / totalSize) * 100);
+            sm.updateProgress(progress);
+
+            if (totalWritten - lastLogBytes >= 10240) {
+                sm.log(`Verified ${Math.floor(totalWritten / 1024)} KB...`);
+                lastLogBytes = totalWritten;
+            }
+        }
+    }
+
     sm.transition('DONE', "STM32 UART Flash complete!");
   } catch (err: any) {
     sm.transition('ERROR', `Error during STM32 UART flash: ${err.message}`);
@@ -992,6 +1030,30 @@ class Stm32UartProtocol {
         
         await this.write(dataBuf);
         await this.waitAck(); // ACK after data
+    }
+
+    async readMemory(address: number, length: number): Promise<Uint8Array> {
+        if (length <= 0 || length > 256) throw new Error("Read length must be between 1 and 256");
+
+        // CMD_READ = 0x11
+        await this.sendCommand(0x11);
+        
+        // Send address
+        const addrBuf = new Uint8Array(5);
+        addrBuf[0] = (address >> 24) & 0xFF;
+        addrBuf[1] = (address >> 16) & 0xFF;
+        addrBuf[2] = (address >> 8) & 0xFF;
+        addrBuf[3] = address & 0xFF;
+        addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // Checksum
+        await this.write(addrBuf);
+        await this.waitAck(); // ACK after address
+
+        // Send N (length - 1) + Checksum (~N)
+        const N = length - 1;
+        await this.write(new Uint8Array([N, N ^ 0xFF]));
+        await this.waitAck(); // ACK after length
+
+        return await this.read(length);
     }
 
     private async sendCommand(cmd: number) {
