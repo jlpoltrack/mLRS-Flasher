@@ -9,6 +9,10 @@ import UpdateBanner from './components/UpdateBanner';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
 
+declare global {
+  const __APP_VERSION__: string;
+}
+
 interface LogEntry {
   type: 'info' | 'error' | 'success' | 'warning';
   message: string;
@@ -35,6 +39,8 @@ function App() {
 
   // load initial data on mount
   useEffect(() => {
+    console.log(`%cmLRS Flasher v${__APP_VERSION__}`, 'color: #3b82f6; font-weight: bold; font-size: 1.2em;');
+    
     async function loadInitialData() {
       if (hasLoaded.current) return;
       hasLoaded.current = true;

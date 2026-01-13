@@ -39,10 +39,6 @@ function Navigation({ activeTab, onTabChange }: NavigationProps) {
           </button>
         ))}
       </div>
-
-      <div className="nav-footer">
-        <span className="version">v0.3.0</span>
-      </div>
     </nav>
   );
 }
