@@ -6,7 +6,8 @@ Phase 1 of the mLRS Flasher Web Port is complete. The application has been succe
 ## Changes Made
 - **Project Structure**: Initialized a new React + Vite + TypeScript project in `/web`.
 - **UI Porting**:
-  - Ported `Navigation`, `FirmwareFlasherPanel`, `Console`, `LuaScript`, `Receiver`, etc.
+  - Ported `Navigation`, `FirmwareFlasherPanel`, `Console`, `LuaScript`.
+  - Consolidated device wrappers (`Receiver`, `TxModule*`) into `DeviceView`.
   - Converted components to TypeScript (`.tsx`).
   - Adapted CSS Modules and styles.
 - **Connectivity**:

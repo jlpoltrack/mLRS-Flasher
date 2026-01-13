@@ -65,7 +65,6 @@ export const api = {
           outputCallback?.({ type: 'info', message: `Target filename: ${file.filename}` });
           const response = await fetch(file.url);
                                         const initialBlob = await response.blob();
-                                        console.log(`Blob size for ${file.filename}: ${initialBlob.size} bytes`);
                                         
                                         const blob = new Blob([initialBlob], { type: 'application/octet-stream' });
                                         const url = window.URL.createObjectURL(blob);
@@ -233,7 +232,6 @@ export const api = {
              const file = firmwareFiles.files.find(f => f.filename === filename);
              
              if (!file) {
-                 console.log('Available files:', firmwareFiles.files.map(f => f.filename));
                  throw new Error(`Firmware file not found: ${filename}`);
              }
              
@@ -260,7 +258,7 @@ export const api = {
   },
   
   cancelPython: async (): Promise<void> => { 
-    console.log('Cancel requested'); 
+    // cancel functionality not implemented for web version
   },
   
   onOutput: (callback: (data: any) => void) => {

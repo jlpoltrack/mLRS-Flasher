@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection } from '../hooks/useFirmwareLoader';
 import { api } from '../api/webSerialApi';
 import type { Version } from '../types';
+import { FlashMethod } from '../constants';
 import './panel.css';
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
@@ -47,12 +48,7 @@ function FirmwareFlasherPanel({
     setError,
   } = useFirmwareLoader(targetType, selectedDevice, selectedVersion);
 
-  useEffect(() => {
-    console.log('FLASH DEBUG: Metadata Updated', metadata);
-    if (metadata) {
-       console.log('FLASH DEBUG: raw_flashmethod:', metadata.raw_flashmethod);
-    }
-  }, [metadata]);
+
 
   const {
     ports,
@@ -77,35 +73,21 @@ function FirmwareFlasherPanel({
   useEffect(() => {
     if (metadata?.raw_flashmethod) {
       const methods = metadata.raw_flashmethod.split(',');
-      console.log('FLASH DEBUG: Available methods:', methods);
       // priorities: esptool, uart, stlink, dfu, appassthru
-      // FIX: Prioritize esptool/uart so ESP devices don't mistakenly fall into stlink mode
-      if (methods.includes('esptool')) {
-          console.log('FLASH DEBUG: Selected esptool');
-          setFlashMethod('esptool');
-      }
-      else if (methods.includes('uart')) {
-          console.log('FLASH DEBUG: Selected uart');
-          setFlashMethod('uart');
-      }
-      else if (methods.includes('stlink')) {
-          console.log('FLASH DEBUG: Selected stlink');
-          setFlashMethod('stlink');
-      }
-      else if (methods.includes('dfu')) {
-          console.log('FLASH DEBUG: Selected dfu');
-          setFlashMethod('dfu');
-      }
-      else if (methods.includes('appassthru')) {
-          console.log('FLASH DEBUG: Selected appassthru');
-          setFlashMethod('appassthru');
-      }
-      else {
-          console.log('FLASH DEBUG: Selected first available:', methods[0]);
+      if (methods.includes(FlashMethod.ESPTool)) {
+          setFlashMethod(FlashMethod.ESPTool);
+      } else if (methods.includes(FlashMethod.UART)) {
+          setFlashMethod(FlashMethod.UART);
+      } else if (methods.includes(FlashMethod.STLink)) {
+          setFlashMethod(FlashMethod.STLink);
+      } else if (methods.includes(FlashMethod.DFU)) {
+          setFlashMethod(FlashMethod.DFU);
+      } else if (methods.includes(FlashMethod.APPassthru)) {
+          setFlashMethod(FlashMethod.APPassthru);
+      } else {
           setFlashMethod(methods[0]);
       }
     } else {
-      console.log('FLASH DEBUG: No raw_flashmethod found');
       setFlashMethod('default');
     }
   }, [metadata]);
@@ -118,14 +100,14 @@ function FirmwareFlasherPanel({
     // FIX: logic now allows selecting port for appassthru if needed, but appassthru usually needs it passed
     // the previous bug was that we didn't force port selection for appassthru in Python,
     // but the UI needs to let the user select it if the method is UART-based or appassthru
-    const needsPort = (flashMethod === 'uart' || flashMethod === 'esptool' || flashMethod === 'appassthru' || metadata?.needsPort);
+    const needsPort = (flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || metadata?.needsPort);
     
     if (needsPort && !selectedPort) {
       setError('Please select a COM port first.');
       return;
     }
 
-    if (flashMethod === 'dfu' && !selectedUSBDevice) {
+    if (flashMethod === FlashMethod.DFU && !selectedUSBDevice) {
        setError('Please select a USB device first.');
        return;
     }
@@ -139,7 +121,7 @@ function FirmwareFlasherPanel({
     
     // special case for appassthru that includes serial port info
     let programmer = 'auto'; // default
-    if (flashMethod === 'appassthru') {
+    if (flashMethod === FlashMethod.APPassthru) {
        // preserve legacy behavior for appassthru which might expect 'stm32 appassthru serialX'
        // actually, the backend refactor now handles 'serialX' via provided_programmer or separate arg?
        // Let's pass the serial info in the programmer string for now to be safe with the new backend logic
@@ -153,12 +135,12 @@ function FirmwareFlasherPanel({
       device: selectedDevice,
       version: selectedVersion,
       flashMethod: flashMethod,
-      passthroughSerial: (flashMethod === 'appassthru') ? serialX : undefined,
+      passthroughSerial: (flashMethod === FlashMethod.APPassthru) ? serialX : undefined,
       url: file.url,
       filename: file.filename,
       port: selectedPort || undefined,
       usbDeviceName: selectedUSBDevice || undefined,
-      baudrate: (flashMethod === 'uart') ? 115200 : undefined,
+      baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === 'rx' ? 'receiver' : 'tx_module',
     });
   }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, serialX, setError, onFlash, targetType]);
@@ -270,7 +252,7 @@ function FirmwareFlasherPanel({
         {metadata?.raw_flashmethod?.includes(',') && (
           <>
              {/* If we are in passthru mode and showing serialX, put them on same row */}
-             {(showSerialX && flashMethod === 'appassthru') ? (
+             {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
                 <>
                   <div className="form-group">
                     <label>Flash Method</label>
@@ -282,11 +264,11 @@ function FirmwareFlasherPanel({
                       >
                         {metadata.raw_flashmethod.split(',').map((m: string) => {
                           let label = m;
-                          if (m === 'dfu') label = 'DFU (USB)';
-                          if (m === 'stlink') label = 'STLink (SWD)';
-                          if (m === 'uart') label = 'SystemBoot (UART)';
-                          if (m === 'esptool') label = 'ESPTool (UART)';
-                          if (m === 'appassthru') label = 'AP Passthru';
+                          if (m === FlashMethod.DFU) label = 'DFU (USB)';
+                          if (m === FlashMethod.STLink) label = 'STLink (SWD)';
+                          if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
+                          if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
+                          if (m === FlashMethod.APPassthru) label = 'AP Passthru';
                           return <option key={m} value={m}>{label}</option>;
                         })}
                       </select>
@@ -320,11 +302,11 @@ function FirmwareFlasherPanel({
                     >
                       {metadata.raw_flashmethod.split(',').map((m: string) => {
                         let label = m;
-                        if (m === 'dfu') label = 'DFU (USB)';
-                        if (m === 'stlink') label = 'STLink (SWD)';
-                        if (m === 'uart') label = 'SystemBoot (UART)';
-                        if (m === 'esptool') label = 'ESPTool (UART)';
-                        if (m === 'appassthru') label = 'AP Passthru';
+                        if (m === FlashMethod.DFU) label = 'DFU (USB)';
+                        if (m === FlashMethod.STLink) label = 'STLink (SWD)';
+                        if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
+                        if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
+                        if (m === FlashMethod.APPassthru) label = 'AP Passthru';
                         return <option key={m} value={m}>{label}</option>;
                       })}
                     </select>
@@ -336,7 +318,7 @@ function FirmwareFlasherPanel({
 
         {/* COM port selection */}
         {/* FIX: Now shown for appassthru as well */}
-        {(metadata?.needsPort || flashMethod === 'uart' || flashMethod === 'esptool' || flashMethod === 'appassthru') && !isFrSkyR9 && (
+        {(metadata?.needsPort || flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) && !isFrSkyR9 && (
           <div className="form-group port-group full-width">
             <label>COM Port</label>
             <div className="port-row">
@@ -359,19 +341,20 @@ function FirmwareFlasherPanel({
                     </select>
                 </div>
                 <button 
-                className="btn-success" 
-                onClick={() => refreshPorts({ request: true })}
-                disabled={isFlashing || isScanningPorts}
-                title="Authorize a new serial device"
+                  className="btn-success" 
+                  onClick={() => refreshPorts({ request: true })}
+                  disabled={isFlashing || isScanningPorts}
+                  title={isScanningPorts ? 'Scanning for ports...' : 'Authorize a new serial device'}
+                  aria-label="Scan for serial ports"
                 >
-                {isScanningPorts ? 'Scanning...' : 'Add Device'}
+                  {isScanningPorts ? 'Scanning...' : 'Add Device'}
                 </button>
             </div>
           </div>
         )}
 
         {/* USB Device selection (for DFU) */}
-        {flashMethod === 'dfu' && (
+        {flashMethod === FlashMethod.DFU && (
           <div className="form-group port-group full-width">
             <label>USB Device (DFU)</label>
             <div className="port-row">
@@ -437,7 +420,7 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {metadata?.description && flashMethod !== 'stlink' && (
+      {metadata?.description && flashMethod !== FlashMethod.STLink && (
         <div className="description-box">
           <div className="flash-card-header">
              <div className="flash-card-title">Flashing Notes</div>
@@ -450,7 +433,7 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {flashMethod === 'stlink' && !isFrSkyR9 && (
+      {flashMethod === FlashMethod.STLink && !isFrSkyR9 && (
         <div className="external-flash-card">
               <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -557,6 +540,8 @@ function FirmwareFlasherPanel({
             className="btn-primary btn-flash"
             onClick={handleFlash}
             disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles}
+            title={isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : undefined}
+            aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
             >
             {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
                 (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
@@ -569,6 +554,8 @@ function FirmwareFlasherPanel({
              className="btn-primary btn-flash"
              onClick={handleFlashWirelessBridge}
              disabled={isFlashing || !selectedFile || firmwareFiles.length === 0}
+             title={isFlashing ? 'Flashing in progress' : !selectedFile ? 'Select a firmware file first' : undefined}
+             aria-label="Flash Wireless Bridge firmware"
            >
              {isFlashing && flashTarget === 'wireless_bridge' ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
            </button>

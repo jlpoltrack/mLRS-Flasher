@@ -23,7 +23,6 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
         });
         
         const fileList = res.files || [];
-        console.log('Lua files:', fileList);
         setFiles(fileList);
         
         // default to first file or empty
@@ -116,6 +115,8 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
           className="btn-primary"
           onClick={handleDownload}
           disabled={isDownloading}
+          title={isDownloading ? 'Download in progress' : undefined}
+          aria-label="Download Lua scripts"
         >
           {isDownloading ? 'Downloading...' : selectedFile === 'all' || !selectedFile ? 'Download All Scripts' : 'Download Script'}
         </button>

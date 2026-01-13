@@ -1,5 +1,7 @@
+import type { LogType } from './constants';
+
 export interface LogEntry {
-  type: 'info' | 'error' | 'success' | 'warning' | 'stderr' | 'default';
+  type: LogType | 'stderr' | 'default';
   message: string;
   timestamp?: string;
 }
@@ -10,19 +12,12 @@ export interface FirmwareFile {
   size?: number;
 }
 
-
 export interface FirmwareMetadata {
   description?: string;
   raw_flashmethod?: string;
   needsPort?: boolean;
   hasWirelessBridge?: boolean;
-  [key: string]: any;
-}
-
-export interface DeviceList {
-  tx: string[];
-  rx: string[];
-  txint: string[];
+  [key: string]: unknown;
 }
 
 export interface Version {
@@ -30,5 +25,4 @@ export interface Version {
   versionStr: string;
   commit: string;
   gitUrl: string;
-  date?: string;
 }

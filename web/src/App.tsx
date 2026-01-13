@@ -1,20 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Navigation from './components/Navigation';
-import TxModuleExternal from './components/TxModuleExternal';
-import Receiver from './components/Receiver';
-import TxModuleInternal from './components/TxModuleInternal';
+import DeviceView from './components/DeviceView';
 import LuaScript from './components/LuaScript';
 import Console from './components/Console';
 import UpdateBanner from './components/UpdateBanner';
+import { TargetType, LogType } from './constants';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
-import type { LogEntry } from './types';
+import type { LogEntry, Version } from './types';
 
 
 function App() {
   const [activeTab, setActiveTab] = useState('tx_ext');
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [versions, setVersions] = useState<any[]>([]);
+  const [versions, setVersions] = useState<Version[]>([]);
   const [devices, setDevices] = useState<{ tx: string[], rx: string[], txint: string[] }>({ tx: [], rx: [], txint: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [isFlashing, setIsFlashing] = useState(false);
@@ -38,11 +37,11 @@ function App() {
       hasLoaded.current = true;
 
       try {
-        addLog({ type: 'info', message: 'Downloading metadata from GitHub...' });
+        addLog({ type: LogType.Info, message: 'Downloading metadata from GitHub...' });
         
         const versionsResult = await api.listVersions();
         const loadedVersions = versionsResult.versions || [];
-        setVersions(loadedVersions);
+        setVersions(loadedVersions as Version[]);
         
         const [txDevices, rxDevices, txintDevices] = await Promise.all([
           api.listDevices('tx'),
@@ -57,12 +56,12 @@ function App() {
         });
         
         if (loadedVersions.length === 0) {
-          addLog({ type: 'error', message: 'No firmware versions found.' });
+          addLog({ type: LogType.Error, message: 'No firmware versions found.' });
         } else {
-          addLog({ type: 'info', message: 'Metadata loaded successfully' });
+          addLog({ type: LogType.Info, message: 'Metadata loaded successfully' });
         }
       } catch (err: any) {
-        addLog({ type: 'error', message: `Failed to load metadata: ${err.message || err}` });
+        addLog({ type: LogType.Error, message: `Failed to load metadata: ${err.message || err}` });
       } finally {
         setIsLoading(false);
       }
@@ -103,11 +102,11 @@ function App() {
       setIsFlashing(false);
       setFlashTarget(null);
       if (data && data.code === 0) {
-        addLog({ type: 'success', message: 'Operation completed successfully!' });
+        addLog({ type: LogType.Success, message: 'Operation completed successfully!' });
       } else if (data && (data.code === null || data.code === 'SIGTERM' || data.code === 137)) {
-        addLog({ type: 'warning', message: 'Operation cancelled by user' });
+        addLog({ type: LogType.Warning, message: 'Operation cancelled by user' });
       } else {
-        addLog({ type: 'error', message: `Operation failed with code ${data?.code}` });
+        addLog({ type: LogType.Error, message: `Operation failed with code ${data?.code}` });
       }
     });
     return cleanup;
@@ -121,18 +120,18 @@ function App() {
     setIsFlashing(true);
     setFlashTarget(options.target || null);
     setProgress(0);
-    addLog({ type: 'info', message: `Starting flash: ${options.filename}` });
+    addLog({ type: LogType.Info, message: `Starting flash: ${options.filename}` });
     
     api.flash(options)
       .then(() => {
         setIsFlashing(false);
         setFlashTarget(null);
-        addLog({ type: 'success', message: 'Flash completed successfully!' });
+        addLog({ type: LogType.Success, message: 'Flash completed successfully!' });
       })
       .catch((err) => {
         setIsFlashing(false);
         setFlashTarget(null);
-        addLog({ type: 'error', message: `Flash failed: ${err.message || err}` });
+        addLog({ type: LogType.Error, message: `Flash failed: ${err.message || err}` });
       });
   }, [addLog]);
 
@@ -149,7 +148,8 @@ function App() {
     switch (activeTab) {
       case 'tx_ext':
         return (
-          <TxModuleExternal 
+          <DeviceView 
+            targetType={TargetType.TxExternal}
             versions={versions} 
             devices={devices.tx} 
             onFlash={handleFlash}
@@ -160,7 +160,8 @@ function App() {
         );
       case 'receiver':
         return (
-          <Receiver 
+          <DeviceView 
+            targetType={TargetType.Receiver}
             versions={versions} 
             devices={devices.rx} 
             onFlash={handleFlash}
@@ -171,7 +172,8 @@ function App() {
         );
       case 'tx_int':
         return (
-          <TxModuleInternal 
+          <DeviceView 
+            targetType={TargetType.TxInternal}
             versions={versions} 
             devices={devices.txint} 
             onFlash={handleFlash}
