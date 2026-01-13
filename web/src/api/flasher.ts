@@ -1,14 +1,7 @@
 import { ESPLoader, Transport } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
-// @ts-ignore
-import intelhex from 'intel-hex';
-import { Buffer } from 'buffer';
-import { initApPassthrough } from './apPassthru';
 
-// Shim Buffer for libraries that expect it (like intel-hex)
-if (typeof window !== 'undefined' && !(window as any).Buffer) {
-    (window as any).Buffer = Buffer;
-}
+import { initApPassthrough } from './apPassthru';
 
 const resolveAssetPath = (path: string) => {
   const base = import.meta.env.BASE_URL || '/';
@@ -390,39 +383,33 @@ async function flashSTM32DFU(
   if (options.filename?.toLowerCase().endsWith('.hex')) {
       onLog?.("Converting Intel HEX to binary...");
       
-      // Mimic hex2bin from mlrs.xyz / dfu-util.js
+      onLog?.("Converting Intel HEX to binary...");
       const decoder = new TextDecoder('utf-8');
       const hexString = decoder.decode(firmwareData);
-      const lines = hexString.split(/\r?\n/);
-      const binary: number[] = [];
-
-      lines.forEach(line => {
-          if (line.length !== 0) {
-              // Validate the line starts with ':'
-              if (line[0] !== ':') {
-                  // console.log(line);
-                   // throw new Error("Invalid Intel HEX format"); // Loose parsing to be safe?
-                   return; // Skip invalid lines
-              }
-
-              // Extract length, address, type, and data
-              const length = parseInt(line.substring(1, 3), 16);
-              const recordType = parseInt(line.substring(7, 9), 16);
-              const data = line.substring(9, 9 + length * 2);
-
-              // Only handle data records (type 00)
-              if (recordType === 0) {
-                  for (let i = 0; i < length; i++) {
-                      const byte = parseInt(data.substring(i * 2, i * 2 + 2), 16);
-                      binary.push(byte);
-                  }
-              }
-          }
-      });
       
-      // Convert binary array to ArrayBuffer
-      binaryData = new Uint8Array(binary).buffer;
-      onLog?.(`HEX converted: ${binaryData.byteLength} bytes`);
+      try {
+          const blocks = parseHex(hexString);
+          
+          // For DFU, we typically expect a single contiguous block or we need to concatenate.
+          // The previous implementation effectively concatenated all data bytes.
+          // We will mimic that behavior by sorting blocks and joining them.
+          
+          blocks.sort((a, b) => a.address - b.address);
+          
+          let totalLen = blocks.reduce((acc, b) => acc + b.data.length, 0);
+          let combined = new Uint8Array(totalLen);
+          let offset = 0;
+          
+          for (const block of blocks) {
+             combined.set(block.data, offset);
+             offset += block.data.length;
+          }
+
+          binaryData = combined.buffer;
+          onLog?.(`HEX converted: ${binaryData.byteLength} bytes from ${blocks.length} block(s)`);
+      } catch (e: any) {
+          throw new Error(`Failed to parse HEX file: ${e.message}`);
+      }
   }
   
   try {
@@ -615,51 +602,13 @@ async function flashSTM32UART(
       const decoder = new TextDecoder();
       const hexText = decoder.decode(firmwareData);
       
-      const lines = hexText.split(/\r?\n/);
-      let highAddress = 0;
-      let currentBuffer: number[] = [];
-      let startAddress = -1;
-
-      // Simple one-pass parser to build blocks
-      for (const line of lines) {
-          if (line.length === 0 || line[0] !== ':') continue;
-          
-          const byteCount = parseInt(line.substring(1, 3), 16);
-          const address = parseInt(line.substring(3, 7), 16);
-          const recordType = parseInt(line.substring(7, 9), 16);
-          const dataHex = line.substring(9, 9 + byteCount * 2);
-
-          if (recordType === 0x00) { // Data
-              const absAddress = highAddress + address;
-              
-              // If this is a new disjoint block or start of file
-              if (startAddress === -1) {
-                  startAddress = absAddress;
-              } else if (absAddress !== startAddress + currentBuffer.length) {
-                  // Push previous block
-                  if (currentBuffer.length > 0) {
-                      memoryBlocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-                  }
-                  startAddress = absAddress;
-                  currentBuffer = [];
-              }
-
-              for (let i = 0; i < byteCount; i++) {
-                  currentBuffer.push(parseInt(dataHex.substring(i * 2, i * 2 + 2), 16));
-              }
-
-          } else if (recordType === 0x01) { // EOF
-              if (currentBuffer.length > 0) {
-                  memoryBlocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-              }
-          } else if (recordType === 0x04) { // Extended Linear Address
-               const upper = parseInt(dataHex.substring(0, 4), 16);
-               highAddress = upper << 16;
-          }
+      try {
+          memoryBlocks = parseHex(hexText);
+          let totalBytes = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
+          onLog?.(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
+      } catch (e: any) {
+          throw new Error(`Failed to parse HEX file: ${e.message}`);
       }
-      
-      let totalBytes = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
-      onLog?.(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
       
   } else {
       // Binary file - assume 0x08000000 start for STM32
@@ -777,11 +726,11 @@ class Stm32UartProtocol {
     private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
     private port: SerialPort;
-    // @ts-ignore
     private onLog?: (msg: string) => void;
     private commands: number[] = [];
     private rxBuffer: number[] = [];
     private readLoopActive = false;
+
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
         this.port = port;
@@ -796,26 +745,6 @@ class Stm32UartProtocol {
         this.writer = this.port.writable!.getWriter();
 
         this.startReadLoop();
-
-        // Automatic bootloader entry sequence (matching stm-serial-flasher logic)
-        // Reset (DTR) is Active Low, Boot0 (RTS) is Active High
-        try {
-            this.onLog?.("Attempting automatic bootloader entry...");
-            // 1. Initial state: Boot0 High, Reset High
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
-            await new Promise(r => setTimeout(r, 100));
-            // 2. Assert Reset Low
-            await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
-            await new Promise(r => setTimeout(r, 100));
-            // 3. Release Reset High
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
-            await new Promise(r => setTimeout(r, 100));
-            // 4. Deassert Boot0 Low
-            await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-            await new Promise(r => setTimeout(r, 200));
-        } catch (e) {
-            // Signal control might not be supported on all platforms/adapters
-        }
 
         this.onLog?.("Flushing serial buffer...");
         this.flush();
@@ -1092,4 +1021,88 @@ class Stm32UartProtocol {
         this.rxBuffer = this.rxBuffer.slice(len);
         return result;
     }
+}
+
+// ------------------------------------
+// Helpers
+// ------------------------------------
+
+function parseHex(hexText: string): { address: number, data: Uint8Array }[] {
+    const blocks: { address: number, data: Uint8Array }[] = [];
+    
+    const lines = hexText.split(/\r?\n/);
+    let highAddress = 0;
+    let currentBuffer: number[] = [];
+    let startAddress = -1;
+
+    for (const line of lines) {
+        if (line.length === 0 || line[0] !== ':') continue;
+        
+        // Parse basic fields
+        const byteCount = parseInt(line.substring(1, 3), 16);
+        const address = parseInt(line.substring(3, 7), 16);
+        const recordType = parseInt(line.substring(7, 9), 16);
+        const dataHex = line.substring(9, 9 + byteCount * 2);
+
+        if (isNaN(byteCount) || isNaN(address) || isNaN(recordType)) {
+             continue;
+        }
+
+        if (recordType === 0x00) { // Data Record
+            const absAddress = highAddress + address;
+            
+            // Check continuity
+            if (startAddress === -1) {
+                startAddress = absAddress;
+            } else if (absAddress !== startAddress + currentBuffer.length) {
+                // Gap detected, flush previous block
+                if (currentBuffer.length > 0) {
+                    blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+                }
+                startAddress = absAddress;
+                currentBuffer = [];
+            }
+
+            for (let i = 0; i < byteCount; i++) {
+                currentBuffer.push(parseInt(dataHex.substring(i * 2, i * 2 + 2), 16));
+            }
+
+        } else if (recordType === 0x01) { // End of File
+            // Flush any remaining data
+            if (currentBuffer.length > 0) {
+                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+            }
+            break; // Stop parsing
+
+        } else if (recordType === 0x02) { // Extended Segment Address
+             // (segment << 4)
+             const segment = parseInt(dataHex.substring(0, 4), 16);
+             highAddress = segment << 4;
+             if (currentBuffer.length > 0) {
+                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+                startAddress = -1;
+                currentBuffer = [];
+             }
+
+        } else if (recordType === 0x04) { // Extended Linear Address
+             // (upper << 16)
+             const upper = parseInt(dataHex.substring(0, 4), 16);
+             highAddress = upper << 16;
+             
+             if (currentBuffer.length > 0) {
+                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+                startAddress = -1;
+                currentBuffer = [];
+             }
+        }
+    }
+    
+    if (currentBuffer.length > 0) {
+         const lastAdded = blocks.length > 0 ? blocks[blocks.length-1] : null;
+         if (!lastAdded || lastAdded.address !== startAddress) {
+             blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
+         }
+    }
+
+    return blocks;
 }
