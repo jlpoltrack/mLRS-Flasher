@@ -10,6 +10,13 @@ if (typeof window !== 'undefined' && !(window as any).Buffer) {
     (window as any).Buffer = Buffer;
 }
 
+const resolveAssetPath = (path: string) => {
+  const base = import.meta.env.BASE_URL || '/';
+  // If path starts with /, remove it to avoid double slash if base ends with /
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  return base.endsWith('/') ? `${base}${cleanPath}` : `${base}/${cleanPath}`;
+};
+
 export interface FlasherOptions {
   chipset: string;
   baud?: number;
@@ -281,21 +288,21 @@ async function flashESP(
         const firmwareOffset = 0x10000;
 
         if (cleanChip.includes('esp32c3')) {
-            bootloaderPath = '/assets/esp32c3/bootloader.bin';
-            partitionsPath = '/assets/esp32c3/partitions.bin';
-            bootAppPath = '/assets/esp32c3/boot_app0.bin';
+            bootloaderPath = resolveAssetPath('/assets/esp32c3/bootloader.bin');
+            partitionsPath = resolveAssetPath('/assets/esp32c3/partitions.bin');
+            bootAppPath = resolveAssetPath('/assets/esp32c3/boot_app0.bin');
             bootloaderOffset = 0x0000;
             flashSize = '4MB';
         } else if (cleanChip.includes('esp32s3')) {
-            bootloaderPath = '/assets/esp32s3/bootloader.bin';
-            partitionsPath = '/assets/esp32s3/partitions.bin';
-            bootAppPath = '/assets/esp32s3/boot_app0.bin';
+            bootloaderPath = resolveAssetPath('/assets/esp32s3/bootloader.bin');
+            partitionsPath = resolveAssetPath('/assets/esp32s3/partitions.bin');
+            bootAppPath = resolveAssetPath('/assets/esp32s3/boot_app0.bin');
             bootloaderOffset = 0x0000;
             flashSize = '8MB';
         } else {
             // Standard ESP32
-            partitionsPath = '/assets/esp32/partitions.bin';
-            bootAppPath = '/assets/esp32/boot_app0.bin';
+            partitionsPath = resolveAssetPath('/assets/esp32/partitions.bin');
+            bootAppPath = resolveAssetPath('/assets/esp32/boot_app0.bin');
             bootloaderOffset = 0x1000;
             flashSize = '4MB';
             
@@ -311,7 +318,7 @@ async function flashESP(
                     }
                 }
             }
-            bootloaderPath = `/assets/esp32/${bootloaderFile}`;
+            bootloaderPath = resolveAssetPath(`/assets/esp32/${bootloaderFile}`);
         }
 
         onLog?.(`Downloading auxiliary files for ${cleanChip}...`);
