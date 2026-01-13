@@ -1,5 +1,5 @@
-// @ts-ignore
-import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkPacket, MavLinkPacketHeader, MavLinkProtocolV2, minimal, common } from 'node-mavlink';
+import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkProtocolV2, minimal, common } from 'node-mavlink';
+import type { MavLinkPacket } from 'node-mavlink';
 
 // ------------------------------------
 // Message Definitions

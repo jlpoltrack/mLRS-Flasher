@@ -3,6 +3,9 @@ import { DFU, DFUse } from 'webdfu';
 
 import { initApPassthrough } from './apPassthru';
 import { FlasherStateMachine } from './flasherStateMachine';
+import { parseHex } from './hexParser';
+import { getPageSize, isKnownChip, FLASH_BASE, MAX_FLASH_SIZE } from './chipConstants';
+import { Stm32UartProtocol } from './stm32UartProtocol';
 
 
 const resolveAssetPath = (path: string) => {
@@ -24,6 +27,7 @@ export interface FlasherOptions {
   device?: string;
   flashMethod?: string;
   passthroughSerial?: string;
+  isWirelessBridge?: boolean; // external tx wireless bridge mode
 }
 
 export async function flash(
@@ -194,15 +198,10 @@ const fetchBinary = async (path: string): Promise<string> => {
     const response = await fetch(path);
     if (!response.ok) throw new Error(`Failed to fetch ${path}`);
     const buffer = await response.arrayBuffer();
-    // SAFE CONVERSION: Avoid TextDecoder('iso-8859-1') as it acts like windows-1252 
-    // and corrupts bytes 0x80-0x9F.
-    let binary = "";
+    // safe conversion: avoid TextDecoder('iso-8859-1') as it acts like windows-1252 
+    // and corrupts bytes 0x80-0x9F. use optimized O(n) approach.
     const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return binary;
+    return Array.from(bytes, b => String.fromCharCode(b)).join('');
 };
 
 async function flashESP(
@@ -254,13 +253,9 @@ async function flashESP(
     }
 
     sm.log("Preparing firmware files...");
-    // SAFE CONVERSION: Manual loop to preserve 0x80-0x9F
-    let firmwareStr = "";
+    // safe conversion: optimized O(n) approach to preserve 0x80-0x9F bytes
     const firmwareBytes = new Uint8Array(firmwareData);
-    const fwLen = firmwareBytes.byteLength;
-    for (let i = 0; i < fwLen; i++) {
-        firmwareStr += String.fromCharCode(firmwareBytes[i]);
-    }
+    const firmwareStr = Array.from(firmwareBytes, b => String.fromCharCode(b)).join('');
     
     // Default to single file at 0x0
     let fileArray = [
@@ -353,13 +348,39 @@ async function flashESP(
 
     sm.transition('RESETTING', "Flash complete! Resetting device...");
     
-    // Manual Reset Sequence
+    // Manual Reset Sequence (resets the ESP)
     await transport.setDTR(false);
     await transport.setRTS(true);
     await new Promise(r => setTimeout(r, 100));
     await transport.setRTS(false);
     
     await transport.disconnect();
+    
+    // for external tx wireless bridge: reset the main MCU via DTR/RTS
+    // DTR/RTS connects to USB-UART which is wired to main MCU reset
+    if (options.isWirelessBridge && options.targetType === 'tx') {
+      sm.log("Resetting main MCU after wireless bridge flash...");
+      await new Promise(r => setTimeout(r, 500));
+      
+      // re-open port to toggle DTR/RTS for main MCU reset
+      try {
+        await port.open({ baudRate: 115200 });
+        const writer = port.writable!.getWriter();
+        
+        // toggle DTR to trigger main MCU reset
+        await (port as any).setSignals({ dataTerminalReady: false });
+        await new Promise(r => setTimeout(r, 100));
+        await (port as any).setSignals({ dataTerminalReady: true });
+        await new Promise(r => setTimeout(r, 100));
+        await (port as any).setSignals({ dataTerminalReady: false });
+        
+        writer.releaseLock();
+        await port.close();
+        sm.log("Main MCU reset complete.");
+      } catch (e: any) {
+        sm.log(`Warning: Main MCU reset failed: ${e.message}`);
+      }
+    }
     
     sm.transition('DONE');
   } catch (err: any) {
@@ -628,20 +649,9 @@ async function flashSTM32UART(
     const chipId = await protocol.getId();
     sm.log(`Chip ID: 0x${chipId.toString(16)}`);
 
-    // Determine page size and erase necessary pages
-    const CHIP_PAGE_SIZES: Record<number, number> = {
-        0x410: 1024,  // STM32F1 Medium Density
-        0x414: 2048,  // STM32F1 High Density
-        0x415: 2048,  // STM32L433/L443
-        0x435: 2048,  // STM32G431/G441 (Category 2)
-        0x462: 2048,  // STM32L45x/46x
-        0x413: 2048,  // STM32F4
-        0x419: 2048,  // STM32F4
-        0x497: 2048,  // STM32WLE5 (LoRa SOC)
-    };
-
-    const pageSize = CHIP_PAGE_SIZES[chipId] || 2048; // Default to 2KB if unknown
-    if (!CHIP_PAGE_SIZES[chipId]) {
+    // determine page size and erase necessary pages
+    const pageSize = getPageSize(chipId);
+    if (!isKnownChip(chipId)) {
         sm.log(`Warning: Unknown Chip ID 0x${chipId.toString(16)}. Assuming 2KB page size.`);
     } else {
         sm.log(`Detected Page Size: ${pageSize} bytes`);
@@ -649,17 +659,15 @@ async function flashSTM32UART(
 
     sm.transition('ERASING', "Calculating pages to erase...");
     
-    // Calculate unique pages
+    // calculate unique pages
     const pagesToErase = new Set<number>();
-    // Flash base address is usually 0x08000000
-    const FLASH_BASE = 0x08000000;
 
     for (const block of memoryBlocks) {
         let addr = block.address;
         const end = block.address + block.data.length;
         
-        // Only erase if in Flash range (standard STM32 flash starts at 0x08000000)
-        if (addr >= FLASH_BASE && addr < FLASH_BASE + 0x200000) { // Check up to 2MB
+        // only erase if in flash range (standard STM32 flash starts at 0x08000000)
+        if (addr >= FLASH_BASE && addr < FLASH_BASE + MAX_FLASH_SIZE) {
              while (addr < end) {
                  const pageIndex = Math.floor((addr - FLASH_BASE) / pageSize);
                  pagesToErase.add(pageIndex);
@@ -760,413 +768,4 @@ async function flashSTM32UART(
   } finally {
     await protocol.disconnect();
   }
-}
-
-class Stm32UartProtocol {
-    private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-    private port: SerialPort;
-    private onLog?: (msg: string) => void;
-    private commands: number[] = [];
-    private rxBuffer: number[] = [];
-    private readLoopActive = false;
-
-
-    constructor(port: SerialPort, onLog?: (msg: string) => void) {
-        this.port = port;
-        this.onLog = onLog;
-    }
-
-    async connect() {
-        // Explicitly set 8E1 and signals to match stm-serial-flasher reference state
-        await (this.port as any).open({ baudRate: 115200, parity: 'even', stopBits: 1 });
-        
-        this.reader = this.port.readable!.getReader();
-        this.writer = this.port.writable!.getWriter();
-
-        this.startReadLoop();
-
-        this.onLog?.("Flushing serial buffer...");
-        this.flush();
-
-        // Wait a moment for bootloader to be ready (prevents initial timeout)
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Retry sync a few times
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            this.onLog?.(`[TX] Sync (0x7F) - Attempt ${attempt}...`);
-            try {
-                await this.write(new Uint8Array([0x7F]));
-                const resp = await this.read(1, 1500); // 1.5s timeout
-                
-                if (resp[0] === 0x79) {
-                    this.onLog?.("[RX] Sync ACK (0x79) - OK.");
-                    return;
-                } else if (resp[0] === 0x1F) {
-                    this.onLog?.("[RX] Sync NACK (0x1F) - Already Synced.");
-                    return;
-                } else {
-                    this.onLog?.(`[RX] Unknown 0x${resp[0].toString(16)} (trying again)`);
-                }
-            } catch (e: any) {
-                this.onLog?.(`Sync attempt ${attempt} failed: ${e.message}`);
-            }
-            
-            await new Promise(r => setTimeout(r, 200));
-        }
-        
-        throw new Error("Failed to sync with bootloader after 3 attempts. Ensure device is in bootloader mode.");
-    }
-
-    async disconnect() {
-        this.readLoopActive = false;
-        if (this.reader) {
-            try { await this.reader.cancel(); } catch(e) {}
-            this.reader.releaseLock();
-            this.reader = null;
-        }
-        if (this.writer) {
-            this.writer.releaseLock();
-            this.writer = null;
-        }
-        try { await this.port.close(); } catch(e) {}
-    }
-
-    private startReadLoop() {
-        if (this.readLoopActive) return;
-        this.readLoopActive = true;
-        (async () => {
-            try {
-                while (this.readLoopActive) {
-                    const { value, done } = await this.reader!.read();
-                    if (done) break;
-                    if (value) {
-                        const arr = Array.from(value);
-                        this.rxBuffer.push(...arr);
-                    }
-                }
-            } catch (e) {
-                // Ignore errors during close
-            } finally {
-                this.readLoopActive = false;
-            }
-        })();
-    }
-
-    private flush() {
-        this.rxBuffer = [];
-    }
-
-    async get() {
-        // CMD_GET = 0x00
-        await this.sendCommand(0x00);
-        
-        const lenBuf = await this.read(1);
-        const len = lenBuf[0]; // N = number of bytes to follow - 1
-        
-        // Read the rest of the payload (N + 1 bytes)
-        // This payload contains [Version, Command1, Command2, ...]
-        const payload = await this.read(len + 1);
-        
-        const version = payload[0];
-        this.commands = Array.from(payload.slice(1));
-        
-        await this.waitAck();
-        return { version, cmds: this.commands };
-    }
-
-    async getId(): Promise<number> {
-        // CMD_GET_ID = 0x02
-        await this.sendCommand(0x02);
-        
-        const lenBuf = await this.read(1);
-        const len = lenBuf[0]; // N = number of bytes to follow - 1
-        
-        // Payload: [PID] (usually 1 byte? No, ID is usually 2 bytes? or just PID?)
-        // AN3155: Byte 1 = N (number of bytes - 1). 
-        // Then N+1 bytes. 
-        // Example: 0x01 (len=1) -> 0x04 0x10 (ID=0x410)
-        
-        const payload = await this.read(len + 1);
-        await this.waitAck();
-        
-        if (payload.length >= 2) {
-             return (payload[0] << 8) | payload[1];
-        } else if (payload.length === 1) {
-             return payload[0];
-        }
-        return 0;
-    }
-
-    async erasePages(pages: number[]) {
-        if (this.commands.length === 0) {
-            throw new Error("Execute GET command first (internal error)");
-        }
-
-        const CMD_ERASE = 0x43;
-        const CMD_EXTENDED_ERASE = 0x44;
-        const USE_EXTENDED = this.commands.includes(CMD_EXTENDED_ERASE);
-        
-        if (!USE_EXTENDED && !this.commands.includes(CMD_ERASE)) {
-            throw new Error("No supported erase command found");
-        }
-
-        // Use Extended Erase (0x44) if available as it supports 2-byte page codes
-        // Standard Erase (0x43) supports 1-byte page codes (0-255).
-        // If we have pages > 255, we must use 0x44.
-
-        // Chunk pages to avoid packet size limits (max 255 bytes payload)
-        // Each page is 2 bytes in Extended (plus 2 bytes count).
-        // Max pages per command ~125.
-        
-        const CHUNK_SIZE = USE_EXTENDED ? 60 : 250; // Safe limits
-
-        for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
-            const chunk = pages.slice(i, i + CHUNK_SIZE);
-            const N = chunk.length;
-            
-            if (USE_EXTENDED) {
-                await this.sendCommand(CMD_EXTENDED_ERASE);
-                
-                // Payload: [N-1 (2 bytes)] [Page0 (2 bytes)] ... [Checksum]
-                // N-1 is 2 bytes, MSB first.
-                const count = N - 1;
-                const data = new Uint8Array(2 + N * 2 + 1);
-                data[0] = (count >> 8) & 0xFF;
-                data[1] = count & 0xFF;
-                
-                let checksum = data[0] ^ data[1];
-                
-                for (let j = 0; j < N; j++) {
-                    const page = chunk[j];
-                    const msb = (page >> 8) & 0xFF;
-                    const lsb = page & 0xFF;
-                    data[2 + j*2] = msb;
-                    data[2 + j*2 + 1] = lsb;
-                    checksum ^= msb ^ lsb;
-                }
-                
-                data[data.length - 1] = checksum;
-                await this.write(data);
-                
-            } else {
-                // Standard Erase 0x43 (0xFF is not used here)
-                // Payload: [N-1 (1 byte)] [Page0 (1 byte)] ... [Checksum]
-                await this.sendCommand(CMD_ERASE);
-                
-                const count = N - 1;
-                const data = new Uint8Array(1 + N + 1);
-                data[0] = count;
-                let checksum = count;
-                
-                for (let j = 0; j < N; j++) {
-                    const page = chunk[j];
-                    if (page > 255) throw new Error(`Page ${page} too high for standard erase`);
-                    data[1 + j] = page;
-                    checksum ^= page;
-                }
-                data[data.length - 1] = checksum;
-                await this.write(data);
-            }
-            
-            await this.waitAck(5000 + N * 50); // Give time for erase
-        }
-    }
-
-    async eraseAll() {
-        if (this.commands.length === 0) {
-            throw new Error("Execute GET command first (internal error)");
-        }
-
-        const CMD_ERASE = 0x43;
-        const CMD_EXTENDED_ERASE = 0x44;
-
-        if (this.commands.includes(CMD_EXTENDED_ERASE)) {
-            // Extended Erase (0x44)
-            // 0x44 -> ACK -> 0xFF 0xFF 0x00 (Global) -> ACK
-            await this.sendCommand(CMD_EXTENDED_ERASE);
-            // Global erase payload: 0xFFFF + checksum
-            // 0xFF 0xFF -> XOR is 0x00.
-            await this.write(new Uint8Array([0xFF, 0xFF, 0x00]));
-            await this.waitAck(30000); // Erase is slow
-        } else if (this.commands.includes(CMD_ERASE)) {
-            // Standard Erase (0x43)
-            // 0x43 -> ACK -> 0xFF (All) -> 0x00 (Checksum) -> ACK
-            await this.sendCommand(CMD_ERASE);
-            await this.write(new Uint8Array([0xFF, 0x00]));
-            await this.waitAck(30000);
-        } else {
-            throw new Error("No supported erase command found (checked 0x43, 0x44)");
-        }
-    }
-
-    async writeMemory(address: number, data: Uint8Array) {
-        // CMD_WRITE = 0x31
-        await this.sendCommand(0x31);
-        
-        // Send address
-        const addrBuf = new Uint8Array(5);
-        addrBuf[0] = (address >> 24) & 0xFF;
-        addrBuf[1] = (address >> 16) & 0xFF;
-        addrBuf[2] = (address >> 8) & 0xFF;
-        addrBuf[3] = address & 0xFF;
-        addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // Checksum
-        await this.write(addrBuf);
-        await this.waitAck(); // ACK after address
-
-        // Send data
-        // N = data.length - 1
-        // Data...
-        // Checksum = N ^ data[0] ^ ... ^ data[N]
-        
-        const len = data.length - 1;
-        let checksum = len;
-        for (const b of data) checksum ^= b;
-        
-        const dataBuf = new Uint8Array(data.length + 2);
-        dataBuf[0] = len;
-        dataBuf.set(data, 1);
-        dataBuf[dataBuf.length - 1] = checksum;
-        
-        await this.write(dataBuf);
-        await this.waitAck(); // ACK after data
-    }
-
-    async readMemory(address: number, length: number): Promise<Uint8Array> {
-        if (length <= 0 || length > 256) throw new Error("Read length must be between 1 and 256");
-
-        // CMD_READ = 0x11
-        await this.sendCommand(0x11);
-        
-        // Send address
-        const addrBuf = new Uint8Array(5);
-        addrBuf[0] = (address >> 24) & 0xFF;
-        addrBuf[1] = (address >> 16) & 0xFF;
-        addrBuf[2] = (address >> 8) & 0xFF;
-        addrBuf[3] = address & 0xFF;
-        addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // Checksum
-        await this.write(addrBuf);
-        await this.waitAck(); // ACK after address
-
-        // Send N (length - 1) + Checksum (~N)
-        const N = length - 1;
-        await this.write(new Uint8Array([N, N ^ 0xFF]));
-        await this.waitAck(); // ACK after length
-
-        return await this.read(length);
-    }
-
-    private async sendCommand(cmd: number) {
-        const buf = new Uint8Array([cmd, cmd ^ 0xFF]);
-        await this.write(buf);
-        await this.waitAck();
-    }
-
-    private async waitAck(timeout = 2000) {
-        const resp = await this.read(1, timeout);
-        if (resp[0] !== 0x79) {
-            throw new Error(`Expected ACK (0x79), got 0x${resp[0].toString(16)}`);
-        }
-    }
-
-    private async write(data: Uint8Array) {
-        await this.writer!.write(data);
-    }
-
-    private async read(len: number, timeout = 1000): Promise<Uint8Array> {
-        const startTime = Date.now();
-        
-        while (this.rxBuffer.length < len) {
-            if (Date.now() - startTime >= timeout) throw new Error("Read timeout");
-            await new Promise(r => setTimeout(r, 10));
-        }
-        
-        const result = new Uint8Array(this.rxBuffer.slice(0, len));
-        this.rxBuffer = this.rxBuffer.slice(len);
-        return result;
-    }
-}
-
-// ------------------------------------
-// Helpers
-// ------------------------------------
-
-function parseHex(hexText: string): { address: number, data: Uint8Array }[] {
-    const blocks: { address: number, data: Uint8Array }[] = [];
-    
-    const lines = hexText.split(/\r?\n/);
-    let highAddress = 0;
-    let currentBuffer: number[] = [];
-    let startAddress = -1;
-
-    for (const line of lines) {
-        if (line.length === 0 || line[0] !== ':') continue;
-        
-        // Parse basic fields
-        const byteCount = parseInt(line.substring(1, 3), 16);
-        const address = parseInt(line.substring(3, 7), 16);
-        const recordType = parseInt(line.substring(7, 9), 16);
-        const dataHex = line.substring(9, 9 + byteCount * 2);
-
-        if (isNaN(byteCount) || isNaN(address) || isNaN(recordType)) {
-             continue;
-        }
-
-        if (recordType === 0x00) { // Data Record
-            const absAddress = highAddress + address;
-            
-            // Check continuity
-            if (startAddress === -1) {
-                startAddress = absAddress;
-            } else if (absAddress !== startAddress + currentBuffer.length) {
-                // Gap detected, flush previous block
-                if (currentBuffer.length > 0) {
-                    blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-                }
-                startAddress = absAddress;
-                currentBuffer = [];
-            }
-
-            for (let i = 0; i < byteCount; i++) {
-                currentBuffer.push(parseInt(dataHex.substring(i * 2, i * 2 + 2), 16));
-            }
-
-        } else if (recordType === 0x01) { // End of File
-            // Flush any remaining data
-            if (currentBuffer.length > 0) {
-                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-            }
-            break; // Stop parsing
-
-        } else if (recordType === 0x02) { // Extended Segment Address
-             // (segment << 4)
-             const segment = parseInt(dataHex.substring(0, 4), 16);
-             highAddress = segment << 4;
-             if (currentBuffer.length > 0) {
-                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-                startAddress = -1;
-                currentBuffer = [];
-             }
-
-        } else if (recordType === 0x04) { // Extended Linear Address
-             // (upper << 16)
-             const upper = parseInt(dataHex.substring(0, 4), 16);
-             highAddress = upper << 16;
-             
-             if (currentBuffer.length > 0) {
-                blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-                startAddress = -1;
-                currentBuffer = [];
-             }
-        }
-    }
-    
-    if (currentBuffer.length > 0) {
-         const lastAdded = blocks.length > 0 ? blocks[blocks.length-1] : null;
-         if (!lastAdded || lastAdded.address !== startAddress) {
-             blocks.push({ address: startAddress, data: new Uint8Array(currentBuffer) });
-         }
-    }
-
-    return blocks;
 }

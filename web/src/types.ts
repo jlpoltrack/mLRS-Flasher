@@ -9,7 +9,7 @@ export interface FirmwareFile {
   url: string;
   size?: number;
 }
-export type { FirmwareFile as FirmwareFileType }; // Duplicate for forcing reload
+
 
 export interface FirmwareMetadata {
   description?: string;

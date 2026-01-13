@@ -12,12 +12,38 @@ import {
 const REPO_OWNER = 'olliw42';
 const REPO_NAME = 'mLRS';
 
-// Cache for API responses
-const cache: Record<string, any> = {};
+// cache for API responses with TTL support
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+const cache: Record<string, CacheEntry> = {};
+
+function getCached(key: string): any | null {
+  const entry = cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    delete cache[key];
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(key: string, data: any): void {
+  cache[key] = { data, timestamp: Date.now() };
+}
+
+export function clearCache(): void {
+  for (const key in cache) {
+    delete cache[key];
+  }
+}
 
 export const githubApi = {
   listVersions: async (): Promise<Version[]> => {
-    if (cache['versions']) return cache['versions'];
+    const cached = getCached('versions');
+    if (cached) return cached;
 
     try {
       const response = await fetch(FIRMWARE_JSON_URL);
@@ -71,7 +97,7 @@ export const githubApi = {
         versions.push({ version: 'main', versionStr: 'main (dev)', commit: 'main', gitUrl: '...' });
       }
 
-      cache['versions'] = versions;
+      setCache('versions', versions);
       return versions;
     } catch (e) {
       console.error('GitHub API error:', e);
@@ -92,14 +118,15 @@ export const githubApi = {
     let tree: any[] = [];
 
     try {
-      if (cache[cacheKey]) {
-        tree = cache[cacheKey];
+      const cachedTree = getCached(cacheKey);
+      if (cachedTree) {
+        tree = cachedTree;
       } else {
         const treeUrl = `${REPOSITORY_TREE_URL}main?recursive=true`;
         const response = await fetch(treeUrl);
         const data = await response.json();
         tree = data.tree || [];
-        cache[cacheKey] = tree;
+        setCache(cacheKey, tree);
       }
 
       // Files are named mlrs-wireless-bridge-<chipset>.ino.bin (e.g. mlrs-wireless-bridge-esp8266.ino.bin)
@@ -136,8 +163,9 @@ export const githubApi = {
     let tree: any[] = [];
 
     try {
-      if (cache[cacheKey]) {
-        tree = cache[cacheKey];
+      const cachedTree = getCached(cacheKey);
+      if (cachedTree) {
+        tree = cachedTree;
       } else {
         let treeUrl = '';
         if (options.version === 'main') {
@@ -153,7 +181,7 @@ export const githubApi = {
         const response = await fetch(treeUrl);
         const data = await response.json();
         tree = data.tree || [];
-        cache[cacheKey] = tree;
+        setCache(cacheKey, tree);
       }
 
       const { deviceDict } = getDeviceInfo(options.device || '', options.type);
@@ -185,7 +213,8 @@ export const githubApi = {
         .map((item: any) => {
           const filename = item.path.split('/').pop() || 'firmware.bin';
           // Use jsDelivr for raw file downloads to avoid rate limits
-          const versionObj = cache['versions']?.find((v: any) => v.version === options.version);
+          const cachedVersions = getCached('versions') as Version[] | null;
+          const versionObj = cachedVersions?.find((v: any) => v.version === options.version);
           const ref = versionObj?.commit || 'main';
           const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
 

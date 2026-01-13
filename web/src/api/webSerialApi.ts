@@ -208,7 +208,8 @@ export const api = {
         erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase) || undefined,
         device: options.device,
         flashMethod: options.flashMethod,
-        passthroughSerial: options.passthroughSerial
+        passthroughSerial: options.passthroughSerial,
+        isWirelessBridge: !!metadata.isWirelessBridgeFirmware
     };
 
     // Determine if we need to fetch firmware data first

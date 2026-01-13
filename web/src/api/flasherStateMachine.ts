@@ -14,6 +14,19 @@ export class FlasherStateMachine {
   private onProgress?: (progress: number, status: string) => void;
   private onLog?: (message: string) => void;
 
+  // valid state transitions for debugging
+  private static readonly validTransitions: Record<FlasherState, FlasherState[]> = {
+    'IDLE': ['CONNECTING', 'ERROR'],
+    'CONNECTING': ['SYNCING', 'ERASING', 'WRITING', 'ERROR'], // some protocols skip syncing
+    'SYNCING': ['ERASING', 'WRITING', 'ERROR'],
+    'ERASING': ['WRITING', 'ERROR'],
+    'WRITING': ['VERIFYING', 'RESETTING', 'DONE', 'ERROR'],
+    'VERIFYING': ['RESETTING', 'DONE', 'ERROR'],
+    'RESETTING': ['DONE', 'ERROR'],
+    'DONE': ['IDLE'], // reset for next flash
+    'ERROR': ['IDLE'], // reset for retry
+  };
+
   constructor(
       onProgress?: (progress: number, status: string) => void,
       onLog?: (message: string) => void
@@ -26,13 +39,19 @@ export class FlasherStateMachine {
    * Transition to a new state and update UI.
    */
   transition(newState: FlasherState, details?: string) {
+    // validate transition in development
+    const validNext = FlasherStateMachine.validTransitions[this.state];
+    if (validNext && !validNext.includes(newState)) {
+      console.warn(`[FlasherStateMachine] Unexpected transition: ${this.state} -> ${newState}`);
+    }
+
     this.state = newState;
     const msg = details ? `${this.readableState(newState)}: ${details}` : this.readableState(newState);
     
-    // Log the transition
+    // log the transition
     this.log(`State -> ${newState} (${msg})`);
     
-    // Update progress bar status text (keep percentage same or reset based on state)
+    // update progress bar status text (keep percentage same or reset based on state)
     this.updateProgressStatus(msg);
 
     if (newState === 'DONE') {

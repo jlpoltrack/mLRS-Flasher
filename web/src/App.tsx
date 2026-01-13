@@ -8,16 +8,8 @@ import Console from './components/Console';
 import UpdateBanner from './components/UpdateBanner';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
+import type { LogEntry } from './types';
 
-declare global {
-  const __APP_VERSION__: string;
-}
-
-interface LogEntry {
-  type: 'info' | 'error' | 'success' | 'warning';
-  message: string;
-  timestamp?: string;
-}
 
 function App() {
   const [activeTab, setActiveTab] = useState('tx_ext');
