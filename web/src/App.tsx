@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import Navigation from './components/Navigation';
 import Console from './components/Console';
 import UpdateBanner from './components/UpdateBanner';
+import BrowserWarning from './components/BrowserWarning';
 import { TargetType, LogType } from './constants';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
@@ -211,6 +212,7 @@ function App() {
             onClose={() => setUpdateInfo(null)}
           />
         )}
+        <BrowserWarning />
         <main className="content">
           {renderContent()}
         </main>

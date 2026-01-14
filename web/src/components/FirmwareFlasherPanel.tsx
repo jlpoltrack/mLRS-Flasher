@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection } from '../hooks/useFirmwareLoader';
 import { api } from '../api/webSerialApi';
 import type { Version } from '../types';
-import { FlashMethod } from '../constants';
+import { FlashMethod, TargetType } from '../constants';
 import './panel.css';
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
@@ -468,45 +468,47 @@ function FirmwareFlasherPanel({
 
       {isFrSkyR9 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
-          {/* Option 1: ELRS Bootloader */}
-          <div className="external-flash-card" style={{ marginTop: 0 }}>
-              <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
-                    <div>
-                      <div className="flash-card-title">Option 1: ELRS Bootloader</div>
-                      <div className="flash-card-desc">.elrs files can be flashed using the radio if the ELRS bootloader has been installed on the Tx module</div>
-                    </div>
+          {/* ELRS Bootloader - only for Tx */}
+          {targetType !== TargetType.Receiver && (
+            <div className="external-flash-card" style={{ marginTop: 0 }}>
+                <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
+                      <div>
+                        <div className="flash-card-title">ELRS Bootloader</div>
+                        <div className="flash-card-desc">.elrs files can be flashed using the radio if the ELRS bootloader has been installed on the Tx module</div>
+                      </div>
+                  </div>
+                  <a 
+                      href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
+                      download={selectedFile}
+                      className="btn-download"
+                  >
+                      Download Firmware
+                  </a>
                 </div>
-                <a 
-                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
-                    download={selectedFile}
-                    className="btn-download"
-                >
-                    Download Firmware
-                </a>
-              </div>
 
-              <div className="flash-steps" style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
-                 <div className="flash-step">
-                  <span>Download the .elrs firmware file</span>
+                <div className="flash-steps" style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
+                  <div className="flash-step">
+                    <span>Download the .elrs firmware file</span>
+                  </div>
+                  <div className="flash-step">
+                    <span>Copy the file to the SD Card of your radio and place it in the firmware folder</span>
+                  </div>
+                  <div className="flash-step">
+                    <span>Flash the module by navigating to the firmware folder, selecting the .elrs file and clicking 'Flash external module'</span>
+                  </div>
                 </div>
-                 <div className="flash-step">
-                  <span>Copy the file to the SD Card of your radio and place it in the firmware folder</span>
-                </div>
-                 <div className="flash-step">
-                  <span>Flash the module by navigating to the firmware folder, selecting the .elrs file and clicking 'Flash external module'</span>
-                </div>
-              </div>
-          </div>
+            </div>
+          )}
 
-          {/* Option 2: STLink/SWD */}
+          {/* STLink/SWD */}
           <div className="external-flash-card" style={{ marginTop: 0 }}>
               <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div className="flash-card-icon">⚡</div>
                     <div>
-                      <div className="flash-card-title">Option 2: STLink / SWD</div>
+                      <div className="flash-card-title">STLink / SWD</div>
                       <div className="flash-card-desc">Standard method using STLink adapter</div>
                     </div>
                 </div>

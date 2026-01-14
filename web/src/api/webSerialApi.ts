@@ -7,6 +7,9 @@ let selectedUSBDevice: any = null;
 let outputCallback: ((data: any) => void) | null = null;
 
 export const api = {
+  isSupported: () => {
+    return !!(navigator.serial && navigator.usb);
+  },
   // GitHub Data Layer (Phase 2)
   listVersions: async () => {
     const versions = await githubApi.listVersions();
