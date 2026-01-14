@@ -10,6 +10,7 @@ import type { LogEntry, Version } from './types';
 
 const DeviceView = lazy(() => import('./components/DeviceView'));
 const LuaScript = lazy(() => import('./components/LuaScript'));
+const SwdTest = lazy(() => import('./components/SwdTest'));
 
 
 function App() {
@@ -200,6 +201,8 @@ function App() {
                   versions={versions}
                 />
               );
+            case 'swd':
+              return <SwdTest />;
             default:
               return null;
           }

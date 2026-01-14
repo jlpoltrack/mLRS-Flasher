@@ -1,4 +1,4 @@
-import { Radio, Cpu, FileCode } from 'lucide-react';
+import { Radio, Cpu, FileCode, Wrench } from 'lucide-react';
 import './navigation.css';
 import logo from '../assets/logo.png';
 
@@ -13,6 +13,7 @@ function Navigation({ activeTab, onTabChange }: NavigationProps) {
     { id: 'receiver', label: 'Receiver', icon: <Cpu size={20} /> },
     { id: 'tx_int', label: 'Tx Module (Internal)', icon: <Radio size={20} /> },
     { id: 'lua', label: 'Lua Script', icon: <FileCode size={20} /> },
+    { id: 'swd', label: 'SWD Test', icon: <Wrench size={20} /> },
   ];
 
   return (
