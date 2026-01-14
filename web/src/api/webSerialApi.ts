@@ -216,7 +216,7 @@ export const api = {
         filename: options.filename,
         reset: options.reset,
         baud: options.baudrate,
-        erase: options.erase || (metadata.isWirelessBridgeFirmware ? (metadata.wireless as any)?.erase : metadata.erase) as string | undefined,
+        erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase),
         device: options.device,
         flashMethod: options.flashMethod,
         passthroughSerial: options.passthroughSerial,

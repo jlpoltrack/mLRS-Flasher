@@ -143,7 +143,7 @@ function FirmwareFlasherPanel({
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === 'rx' ? 'receiver' : 'tx_module',
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, serialX, setError, onFlash, targetType, metadata, serialX]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, serialX, setError, onFlash, targetType, metadata]);
 
   const handleFlashWirelessBridge = useCallback(async () => {
     if (!metadata?.wireless?.chipset) {

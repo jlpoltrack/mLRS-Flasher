@@ -12,11 +12,22 @@ export interface FirmwareFile {
   size?: number;
 }
 
+export interface WirelessBridgeConfig {
+  chipset?: string;
+  erase?: string;
+  baud?: number;
+  reset?: string;
+}
+
 export interface FirmwareMetadata {
   description?: string;
   raw_flashmethod?: string;
   needsPort?: boolean;
   hasWirelessBridge?: boolean;
+  isWirelessBridgeFirmware?: boolean;
+  chipset?: string;
+  erase?: string;
+  wireless?: WirelessBridgeConfig;
   [key: string]: unknown;
 }
 

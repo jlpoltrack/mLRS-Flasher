@@ -10,6 +10,8 @@ interface Navigator {
 
 // Minimal type definitions for Web Serial API if not picked up by @types/w3c-web-serial
 interface Serial {
+  onconnect: ((this: Serial, ev: Event) => any) | null;
+  ondisconnect: ((this: Serial, ev: Event) => any) | null;
   requestPort(options?: SerialPortRequestOptions): Promise<SerialPort>;
   getPorts(): Promise<SerialPort[]>;
 }
@@ -23,6 +25,12 @@ interface SerialPortFilter {
   usbProductId?: number;
 }
 
+interface SerialPortSignals {
+  dataTerminalReady?: boolean;
+  requestToSend?: boolean;
+  break?: boolean;
+}
+
 interface SerialPort {
   onconnect: ((this: SerialPort, ev: Event) => any) | null;
   ondisconnect: ((this: SerialPort, ev: Event) => any) | null;
@@ -32,6 +40,7 @@ interface SerialPort {
   close(): Promise<void>;
   getInfo(): SerialPortInfo;
   forget(): Promise<void>;
+  setSignals(signals: SerialPortSignals): Promise<void>;
 }
 
 interface SerialOptions {

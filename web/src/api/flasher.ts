@@ -380,14 +380,11 @@ async function flashESP(
         const writer = port.writable!.getWriter();
         
         // toggle DTR to trigger main MCU reset
-        // @ts-ignore
-        await (port as any).setSignals({ dataTerminalReady: false });
+        await port.setSignals({ dataTerminalReady: false });
         await new Promise(r => setTimeout(r, 100));
-        // @ts-ignore
-        await (port as any).setSignals({ dataTerminalReady: true });
+        await port.setSignals({ dataTerminalReady: true });
         await new Promise(r => setTimeout(r, 100));
-        // @ts-ignore
-        await (port as any).setSignals({ dataTerminalReady: false });
+        await port.setSignals({ dataTerminalReady: false });
         
         writer.releaseLock();
         await port.close();
