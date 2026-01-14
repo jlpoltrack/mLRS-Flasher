@@ -78,3 +78,22 @@ export const DEVICE_CONFIGS: Record<TargetType, DeviceViewConfig> = {
     allowWirelessBridge: true,
   },
 };
+
+/**
+ * serial port filter presets for common devices
+ */
+export const SERIAL_FILTERS = [
+  { usbVendorId: 0x0483, usbProductId: 0x5740 }, // EdgeTX/OpenTX
+  { usbVendorId: 0x0483, usbProductId: 0x374E }, // ST-Link
+  { usbVendorId: 0x1209 },                       // ArduPilot
+  { usbVendorId: 0x10C4 },                       // CP210x (Silicon Labs)
+  { usbVendorId: 0x0403 },                       // FTDI
+  { usbVendorId: 0x1A86 },                       // CH340 (WCH)
+] as const;
+
+/**
+ * usb device filter presets
+ */
+export const USB_FILTERS = [
+  { vendorId: 0x0483 }, // STM32 Vendor ID
+] as const;

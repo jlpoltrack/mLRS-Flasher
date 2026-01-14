@@ -235,7 +235,7 @@ async function flashESP(
   }
 
   // @ts-ignore: ESPLoader types are not perfect
-  const transport = new Transport(port);
+  const transport = new Transport(port as any);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
   if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
@@ -420,21 +420,34 @@ async function flashSTM32DFU(
           
           // For DFU, we typically expect a single contiguous block or we need to concatenate.
           // The previous implementation effectively concatenated all data bytes.
-          // We will mimic that behavior by sorting blocks and joining them.
+          // We now handle gaps by creating a contiguous buffer padded with 0xFF.
           
           blocks.sort((a, b) => a.address - b.address);
           
-          let totalLen = blocks.reduce((acc, b) => acc + b.data.length, 0);
-          let combined = new Uint8Array(totalLen);
-          let offset = 0;
-          
-          for (const block of blocks) {
-             combined.set(block.data, offset);
-             offset += block.data.length;
-          }
+          if (blocks.length > 0) {
+              const startAddr = blocks[0].address;
+              const lastBlock = blocks[blocks.length - 1];
+              const endAddr = lastBlock.address + lastBlock.data.length;
+              const totalLen = endAddr - startAddr;
 
-          binaryData = combined.buffer;
-          sm.log(`HEX converted: ${binaryData.byteLength} bytes from ${blocks.length} block(s)`);
+              // Safety check: Don't allocate massive buffers if there's a huge gap (e.g. > 2MB)
+              if (totalLen > 2 * 1024 * 1024) {
+                   throw new Error("HEX file content spans too large a memory range for DFU. Please use a contiguous firmware file.");
+              }
+
+              const combined = new Uint8Array(totalLen);
+              combined.fill(0xFF); // Fill with erased state
+
+              for (const block of blocks) {
+                  const offset = block.address - startAddr;
+                  combined.set(block.data, offset);
+              }
+
+              binaryData = combined.buffer;
+              sm.log(`HEX converted: ${binaryData.byteLength} bytes (padded with 0xFF for gaps)`);
+          } else {
+              throw new Error("HEX file is empty");
+          }
       } catch (e) {
           throw new Error(`Failed to parse HEX file: ${e instanceof Error ? e.message : String(e)}`);
       }

@@ -1,20 +1,7 @@
+import { SERIAL_FILTERS, USB_FILTERS } from '../constants';
+
 // hardware service - manages web serial and webusb connections
 // 2026-01-13
-
-// serial port filter presets for common devices
-const SERIAL_FILTERS: SerialPortFilter[] = [
-  { usbVendorId: 0x0483, usbProductId: 0x5740 }, // EdgeTX/OpenTX
-  { usbVendorId: 0x0483, usbProductId: 0x374E }, // ST-Link
-  { usbVendorId: 0x1209 },                       // ArduPilot
-  { usbVendorId: 0x10C4 },                       // CP210x (Silicon Labs)
-  { usbVendorId: 0x0403 },                       // FTDI
-  { usbVendorId: 0x1A86 },                       // CH340 (WCH)
-];
-
-// usb device filter presets
-const USB_FILTERS: USBDeviceFilter[] = [
-  { vendorId: 0x0483 }, // STM32 Vendor ID
-];
 
 // module-level state for selected devices
 let selectedPort: SerialPort | null = null;
@@ -71,7 +58,8 @@ export async function requestPort(): Promise<string | null> {
   }
   
   try {
-    selectedPort = await navigator.serial.requestPort({ filters: SERIAL_FILTERS });
+    // spread to mutable array to satisfy strict TS types
+    selectedPort = await navigator.serial.requestPort({ filters: [...SERIAL_FILTERS] });
     
     // calculate the unique name for this newly selected port
     const allPorts = await navigator.serial.getPorts();
@@ -110,7 +98,8 @@ export async function requestUSBDevice(): Promise<string | null> {
     return null;
   }
   try {
-    selectedUSBDevice = await navigator.usb.requestDevice({ filters: USB_FILTERS });
+    // spread to mutable array
+    selectedUSBDevice = await navigator.usb.requestDevice({ filters: [...USB_FILTERS] });
     return formatUSBName(selectedUSBDevice);
   } catch (err) {
     return null;

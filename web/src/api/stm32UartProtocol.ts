@@ -13,6 +13,7 @@ export class Stm32UartProtocol {
     private commands: number[] = [];
     private rxBuffer: number[] = [];
     private readLoopActive = false;
+    private readResolver: (() => void) | null = null;
 
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
@@ -86,6 +87,7 @@ export class Stm32UartProtocol {
                     if (value) {
                         const arr = Array.from(value);
                         this.rxBuffer.push(...arr);
+                        if (this.readResolver) this.readResolver();
                     }
                 }
             } catch (e) {
@@ -320,8 +322,24 @@ export class Stm32UartProtocol {
         const startTime = Date.now();
         
         while (this.rxBuffer.length < len) {
-            if (Date.now() - startTime >= timeout) throw new Error("Read timeout");
-            await new Promise(r => setTimeout(r, 10));
+            const elapsed = Date.now() - startTime;
+            const remaining = timeout - elapsed;
+            
+            if (remaining <= 0) throw new Error("Read timeout");
+            
+            await new Promise<void>((resolve) => {
+                // Set up the resolver that startReadLoop will call
+                this.readResolver = resolve;
+                
+                // Also set a timeout to force wake up if no data comes
+                setTimeout(() => {
+                    // If we timed out, clear the resolver so startReadLoop doesn't call a stale one
+                    if (this.readResolver === resolve) {
+                        this.readResolver = null;
+                        resolve();
+                    }
+                }, remaining);
+            });
         }
         
         const result = new Uint8Array(this.rxBuffer.slice(0, len));

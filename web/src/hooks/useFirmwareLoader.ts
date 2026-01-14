@@ -190,15 +190,28 @@ export function useSerialPorts(isPaused = false) {
     refreshPorts();
   }, [refreshPorts]);
 
-  // auto-refresh interval
+  // auto-refresh interval and event listeners
   useEffect(() => {
     if (isPaused) return;
 
-    const intervalId = setInterval(() => {
-      refreshPorts({ silent: true });
-    }, 2000); // refresh every 2 seconds
+    const handleUpdate = () => refreshPorts({ silent: true });
 
-    return () => clearInterval(intervalId);
+    // Poll every 2s as fallback and to ensure state consistency
+    const intervalId = setInterval(handleUpdate, 2000);
+
+    // Use event listeners for reactive updates
+    if (navigator.serial) {
+        navigator.serial.addEventListener('connect', handleUpdate);
+        navigator.serial.addEventListener('disconnect', handleUpdate);
+    }
+
+    return () => {
+        clearInterval(intervalId);
+        if (navigator.serial) {
+            navigator.serial.removeEventListener('connect', handleUpdate);
+            navigator.serial.removeEventListener('disconnect', handleUpdate);
+        }
+    };
   }, [refreshPorts, isPaused]);
 
   const forgetAll = useCallback(async () => {

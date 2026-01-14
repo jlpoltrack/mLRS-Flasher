@@ -232,8 +232,8 @@ class MavLinkConnection {
         msg.targetSystem = this.targetSysId;
         msg.targetComponent = this.targetCompId;
         msg.paramId = paramId;
-        // @ts-ignore: Preserving previous behavior (type 0)
-        msg.paramType = 0; 
+        // paramType is missing in some type definitions but required by ArduPilot
+        (msg as any).paramType = 0; 
         
         await this.send(msg);
         await this.waitForPacket(22, 500); // Wait for value confirmation
@@ -324,8 +324,8 @@ export async function initApPassthrough(
     // Logic: Identify all candidate ports. Try each one.
     // If we find a heartbeat, lock it.
     
-    // @ts-ignore
-    const candidates = (await navigator.serial.getPorts()).filter((p: any) => {
+    const allPorts = await (navigator.serial as any).getPorts();
+    const candidates = allPorts.filter((p: any) => {
          const i = p.getInfo();
          return i.usbVendorId === targetVid && i.usbProductId === targetPid;
     });
@@ -363,7 +363,13 @@ export async function initApPassthrough(
     }
 
     if (!foundInitial || !mav) {
-        throw new Error("Connection failed: No MAVLink heartbeat detected on any candidate port (10s window).");
+        throw new Error(
+            "Connection failed: No MAVLink heartbeat detected on any candidate port (10s window).\n" +
+            "Please ensure:\n" +
+            "1. The Flight Controller is connected via USB.\n" +
+            "2. You have selected the correct COM port (check Device Manager/System Report).\n" +
+            "3. If using a different port instance (e.g. Composite device), try clicking 'Add Device' again to re-authorize the correct interface."
+        );
     }
 
     // ---------------------------------------------------------
@@ -446,8 +452,8 @@ export async function initApPassthrough(
              // 60s Reconnect Loop
              while (Date.now() - startTime < 60000) {
                  // Refresh candidates
-                 // @ts-ignore
-                 const freshCandidates = (await navigator.serial.getPorts()).filter((p: any) => {
+                 const allPorts = await (navigator.serial as any).getPorts();
+                 const freshCandidates = allPorts.filter((p: any) => {
                      const i = p.getInfo();
                      return i.usbVendorId === targetVid && i.usbProductId === targetPid;
                  });
