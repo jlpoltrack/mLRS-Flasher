@@ -1,4 +1,4 @@
-import type { Version, FirmwareFile } from '../types';
+import type { Version, FirmwareFile, FirmwareMetadata } from '../types';
 import { 
   getDeviceInfo, 
   resolveChipset, 
@@ -14,23 +14,23 @@ const REPO_NAME = 'mLRS';
 
 // cache for API responses with TTL support
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-interface CacheEntry {
-  data: any;
+interface CacheEntry<T> {
+  data: T;
   timestamp: number;
 }
-const cache: Record<string, CacheEntry> = {};
+const cache: Record<string, CacheEntry<unknown>> = {};
 
-function getCached(key: string): any | null {
+function getCached<T>(key: string): T | null {
   const entry = cache[key];
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
     delete cache[key];
     return null;
   }
-  return entry.data;
+  return entry.data as T;
 }
 
-function setCache(key: string, data: any): void {
+function setCache<T>(key: string, data: T): void {
   cache[key] = { data, timestamp: Date.now() };
 }
 
@@ -40,9 +40,22 @@ export function clearCache(): void {
   }
 }
 
+interface GitHubTreeItem {
+  path: string;
+  type: string;
+  size?: number;
+  url?: string;
+  sha?: string;
+}
+
+interface GitHubTreeResponse {
+  tree: GitHubTreeItem[];
+  truncated: boolean;
+}
+
 export const githubApi = {
   listVersions: async (): Promise<Version[]> => {
-    const cached = getCached('versions');
+    const cached = getCached<Version[]>('versions');
     if (cached) return cached;
 
     try {
@@ -71,15 +84,15 @@ export const githubApi = {
       // 2. Discover dev version from main branch tree
       try {
         const treeResp = await fetch(`${REPOSITORY_TREE_URL}main?recursive=true`);
-        const treeData = await treeResp.json();
+        const treeData: GitHubTreeResponse = await treeResp.json();
         const tree = treeData.tree || [];
         
         // Find a firmware file to extract the version string from (e.g. v1.3.07-@21c6abd9)
-        const sampleFile = tree.find((f: any) => f.path.includes('pre-release-stm32/') && f.path.endsWith('.hex'));
+        const sampleFile = tree.find((f) => f.path.includes('pre-release-stm32/') && f.path.endsWith('.hex'));
         if (sampleFile) {
             const parts = sampleFile.path.split('-');
-            const vPart = parts.find((p: string) => p.startsWith('v') && p.includes('.'));
-            const cPart = parts.find((p: string) => p.startsWith('@'));
+            const vPart = parts.find((p) => p.startsWith('v') && p.includes('.'));
+            const cPart = parts.find((p) => p.startsWith('@'));
             
             if (vPart && cPart) {
                 const devVer = `${vPart}-${cPart}`;
@@ -115,16 +128,16 @@ export const githubApi = {
   listWirelessBridgeFirmware: async (options: { version: string, chipset: string }): Promise<FirmwareFile[]> => {
     // Wireless bridge firmware is always pulled from main branch, as it's not versioned with releases
     const cacheKey = `firmware-main`; 
-    let tree: any[] = [];
+    let tree: GitHubTreeItem[] = [];
 
     try {
-      const cachedTree = getCached(cacheKey);
+      const cachedTree = getCached<GitHubTreeItem[]>(cacheKey);
       if (cachedTree) {
         tree = cachedTree;
       } else {
         const treeUrl = `${REPOSITORY_TREE_URL}main?recursive=true`;
         const response = await fetch(treeUrl);
-        const data = await response.json();
+        const data: GitHubTreeResponse = await response.json();
         tree = data.tree || [];
         setCache(cacheKey, tree);
       }
@@ -133,14 +146,14 @@ export const githubApi = {
       const targetPrefix = `mlrs-wireless-bridge-${options.chipset}`;
 
       return tree
-        .filter((item: any) => {
+        .filter((item) => {
           if (item.type !== 'blob') return false;
           if (!item.path.includes('firmware/wirelessbridge/')) return false;
           
           const filename = item.path.split('/').pop() || '';
           return filename.startsWith(targetPrefix);
         })
-        .map((item: any) => {
+        .map((item) => {
           const filename = item.path.split('/').pop() || 'firmware.bin';
           const ref = 'main'; // Always use main for wireless bridge
           const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
@@ -160,10 +173,10 @@ export const githubApi = {
 
   listFirmware: async (options: { type: string, device?: string, version: string }): Promise<{ files: FirmwareFile[] }> => {
     const cacheKey = `firmware-${options.version}`;
-    let tree: any[] = [];
+    let tree: GitHubTreeItem[] = [];
 
     try {
-      const cachedTree = getCached(cacheKey);
+      const cachedTree = getCached<GitHubTreeItem[]>(cacheKey);
       if (cachedTree) {
         tree = cachedTree;
       } else {
@@ -179,7 +192,7 @@ export const githubApi = {
         }
 
         const response = await fetch(treeUrl);
-        const data = await response.json();
+        const data: GitHubTreeResponse = await response.json();
         tree = data.tree || [];
         setCache(cacheKey, tree);
       }
@@ -188,7 +201,7 @@ export const githubApi = {
       const fname = deviceDict.fname || '';
 
       const files: FirmwareFile[] = tree
-        .filter((item: any) => {
+        .filter((item) => {
           if (item.type !== 'blob') return false;
           const path = item.path;
 
@@ -210,11 +223,11 @@ export const githubApi = {
 
           return true;
         })
-        .map((item: any) => {
+        .map((item) => {
           const filename = item.path.split('/').pop() || 'firmware.bin';
           // Use jsDelivr for raw file downloads to avoid rate limits
-          const cachedVersions = getCached('versions') as Version[] | null;
-          const versionObj = cachedVersions?.find((v: any) => v.version === options.version);
+          const cachedVersions = getCached<Version[]>('versions');
+          const versionObj = cachedVersions?.find((v) => v.version === options.version);
           const ref = versionObj?.commit || 'main';
           const rawUrl = `https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/${item.path}`;
 
@@ -233,7 +246,7 @@ export const githubApi = {
     }
   },
 
-  getMetadata: async (options: { type: string, device: string, filename: string }): Promise<any> => {
+  getMetadata: async (options: { type: string, device: string, filename: string }): Promise<FirmwareMetadata | null> => {
     const { targetDict, deviceDict } = getDeviceInfo(options.device, options.type);
     if (!deviceDict || Object.keys(deviceDict).length === 0) return null;
 
@@ -310,7 +323,8 @@ export const githubApi = {
       programmer,
       hasWirelessBridge: !!wireless,
       wireless,
-      erase
+      erase,
+      isWirelessBridgeFirmware: false
     };
   }
 };

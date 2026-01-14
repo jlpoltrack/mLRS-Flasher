@@ -1,10 +1,16 @@
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
 import type { FlasherOptions } from './flasher';
+import type { FirmwareFile } from '../types';
 
-let selectedPort: any = null;
-let selectedUSBDevice: any = null;
+let selectedPort: SerialPort | null = null;
+let selectedUSBDevice: USBDevice | null = null;
 let outputCallback: ((data: any) => void) | null = null;
+
+export interface PortInfo {
+  name: string;
+  port: SerialPort;
+}
 
 export const api = {
   isSupported: () => {
@@ -56,8 +62,9 @@ export const api = {
     outputCallback?.({ type: 'info', message: `Downloading Lua script(s) for ${version}...` });
     
     try {
-      const files = await githubApi.listFirmware({ type: 'lua', version });
-      const filesToDownload = filename ? files.files.filter(f => f.filename === filename) : files.files;
+      const filesRes = await githubApi.listFirmware({ type: 'lua', version });
+      const files: FirmwareFile[] = filesRes.files;
+      const filesToDownload = filename ? files.filter(f => f.filename === filename) : files;
       
       if (filesToDownload.length === 0) {
         throw new Error("No Lua files found to download");
@@ -99,9 +106,7 @@ export const api = {
   
   // Web Serial Implementation (Phase 1)
   listPorts: async (): Promise<{ ports: string[] }> => {
-    // @ts-ignore
     if (!navigator.serial) return { ports: [] };
-    // @ts-ignore
     const ports = await navigator.serial.getPorts();
     const uniquePorts = getUniquePorts(ports);
     return { ports: uniquePorts.map(p => p.name) };
@@ -129,10 +134,9 @@ export const api = {
       
       // Calculate the unique name for this newly selected port
       // so the UI can auto-select it confidently.
-      // @ts-ignore
       const allPorts = await navigator.serial.getPorts();
       const uniquePorts = getUniquePorts(allPorts);
-      const match = uniquePorts.find((p: any) => p.port === selectedPort);
+      const match = uniquePorts.find((p) => p.port === selectedPort);
       
       return match ? match.name : formatPortName(selectedPort);
     } catch (err) {
@@ -163,7 +167,6 @@ export const api = {
 
   forgetAllPorts: async (): Promise<void> => {
     if (!navigator.serial) return;
-    // @ts-ignore
     const ports = await navigator.serial.getPorts();
     for (const port of ports) {
         if (port.forget) {
@@ -192,8 +195,14 @@ export const api = {
   }): Promise<void> => { 
     const { type, device, filename } = options;
     const metadata = await githubApi.getMetadata({ type, device, filename });
-    const chipset = metadata.chipset || 'stm32';
-    const flashmethod = options.flashMethod || metadata.raw_flashmethod || '';
+
+    // Metadata is now strictly typed to return FirmwareMetadata | null
+    if (!metadata) {
+         throw new Error(`Device not found in database: ${device}`);
+    }
+
+    const chipset = (metadata.chipset as string) || 'stm32';
+    const flashmethod = options.flashMethod || (metadata.raw_flashmethod as string) || '';
     
     const flasherOptions: FlasherOptions = {
         chipset,
@@ -207,7 +216,7 @@ export const api = {
         filename: options.filename,
         reset: options.reset,
         baud: options.baudrate,
-        erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase) || undefined,
+        erase: options.erase || (metadata.isWirelessBridgeFirmware ? (metadata.wireless as any)?.erase : metadata.erase) as string | undefined,
         device: options.device,
         flashMethod: options.flashMethod,
         passthroughSerial: options.passthroughSerial,
@@ -250,7 +259,7 @@ export const api = {
         return flash(activeDevice, data, flasherOptions);
     } else {
         // Robust Lookup: Use getUniquePorts to match strictly by the unique name selected in UI
-        const allPorts = await (navigator as any).serial.getPorts();
+        const allPorts = await navigator.serial.getPorts();
         const uniquePorts = getUniquePorts(allPorts);
         const match = uniquePorts.find(p => p.name === options.port);
         const activePort = selectedPort || match?.port;
@@ -274,35 +283,12 @@ export const api = {
 };
 
 // Helper to generate unique names for ports in order
-function getUniquePorts(ports: any[]): { name: string, port: any }[] {
-    const counts = new Map<string, number>();
-    const results: { name: string, port: any }[] = [];
-
-    for (const port of ports) {
-        const baseName = formatPortName(port);
-        let name = baseName;
-        
-        if (counts.has(baseName)) {
-            const count = counts.get(baseName)! + 1;
-            counts.set(baseName, count);
-            name = `${baseName} (${count})`;
-        } else {
-            // Check if there are future duplicates?
-            // Actually, we need to know if there ARE duplicates total to determine if we should number the first one.
-            // But simple sequential numbering (1), (2) is fine if we just start numbering from 2 or treat first as base?
-            // Standard practice: "Name", "Name (2)", "Name (3)".
-            // BUT if we want "Name (1)" to be explicit, we need two passes.
-            // Let's stick to valid distinct names.
-            // Actually, simply appending count if count > 0 is redundant for the first one usually.
-            // Simpler: Just count them.
-            counts.set(baseName, 1);
-        }
-        results.push({ name, port }); // This is WRONG, I need 2 passes to know if I should append (1)
-    }
-
-    // 2-pass approach for cleaner names
+function getUniquePorts(ports: SerialPort[]): { name: string, port: SerialPort }[] {
     const frequency = new Map<string, number>();
-    for (const port of ports) frequency.set(formatPortName(port), (frequency.get(formatPortName(port)) || 0) + 1);
+    for (const port of ports) {
+        const name = formatPortName(port);
+        frequency.set(name, (frequency.get(name) || 0) + 1);
+    }
 
     const currentCounts = new Map<string, number>();
     return ports.map(port => {
@@ -319,7 +305,7 @@ function getUniquePorts(ports: any[]): { name: string, port: any }[] {
     });
 }
 
-function formatPortName(port: any): string {
+function formatPortName(port: SerialPort): string {
   const info = port.getInfo();
   
   // Try to find any other properties
@@ -337,13 +323,13 @@ function formatPortName(port: any): string {
   let display = `${label} (VID:${vid} PID:${pid})`;
   
   if (extraKeys.length > 0) {
-      display += ` [${extraKeys.map(k => `${k}:${info[k]}`).join(' ')}]`;
+      display += ` [${extraKeys.map(k => `${k}: ${(info as any)[k]}`).join(' ')}]`;
   }
 
   return display;
 }
 
-function formatUSBName(device: any): string {
+function formatUSBName(device: USBDevice): string {
   const vid = device.vendorId.toString(16).padStart(4, '0').toUpperCase();
   const pid = device.productId.toString(16).padStart(4, '0').toUpperCase();
   return `USB DFU (${vid}:${pid})`;

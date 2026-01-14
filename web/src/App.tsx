@@ -43,7 +43,7 @@ function App() {
         
         const versionsResult = await api.listVersions();
         const loadedVersions = versionsResult.versions || [];
-        setVersions(loadedVersions as Version[]);
+        setVersions(loadedVersions);
         
         const [txDevices, rxDevices, txintDevices] = await Promise.all([
           api.listDevices('tx'),
@@ -62,8 +62,8 @@ function App() {
         } else {
           addLog({ type: LogType.Info, message: 'Metadata loaded successfully' });
         }
-      } catch (err: any) {
-        addLog({ type: LogType.Error, message: `Failed to load metadata: ${err.message || err}` });
+      } catch (err) {
+        addLog({ type: LogType.Error, message: `Failed to load metadata: ${err instanceof Error ? err.message : String(err)}` });
       } finally {
         setIsLoading(false);
       }
@@ -89,10 +89,12 @@ function App() {
   // listen for python output
   useEffect(() => {
     const cleanup = api.onOutput((data: any) => {
+      // Data type from backend (callback in webSerialApi)
+      // currently untyped in callback signature, but structure is { type: 'progress'|'log'|LogType, ... }
       if (data.type === 'progress') {
         setProgress(data.progress);
       } else {
-        addLog(data);
+        addLog(data as LogEntry);
       }
     });
     return cleanup;
@@ -119,11 +121,16 @@ function App() {
   }, []);
 
   const handleFlash = useCallback((options: any) => {
+    // options is loosely typed coming from child components, but should match FlasherOptions args
+    // However, handleFlash takes the UI options and passes them to api.flash
+
     setIsFlashing(true);
     setFlashTarget(options.target || null);
     setProgress(0);
     addLog({ type: LogType.Info, message: `Starting flash: ${options.filename}` });
     
+    // cast to the expected input for api.flash (which is strict now)
+    // api.flash signature: (options: { filename, version, port?, usbDeviceName?, ... })
     api.flash(options)
       .then(() => {
         setIsFlashing(false);
@@ -133,7 +140,7 @@ function App() {
       .catch((err) => {
         setIsFlashing(false);
         setFlashTarget(null);
-        addLog({ type: LogType.Error, message: `Flash failed: ${err.message || err}` });
+        addLog({ type: LogType.Error, message: `Flash failed: ${err instanceof Error ? err.message : String(err)}` });
       });
   }, [addLog]);
 
