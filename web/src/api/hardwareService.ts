@@ -172,5 +172,15 @@ export function formatPortName(port: SerialPort): string {
 export function formatUSBName(device: USBDevice): string {
   const vid = device.vendorId.toString(16).padStart(4, '0').toUpperCase();
   const pid = device.productId.toString(16).padStart(4, '0').toUpperCase();
-  return `USB DFU (${vid}:${pid})`;
+  
+  if (device.vendorId === 0x0483) {
+    if (pid === '3748' || pid === '374B' || pid === '374A' || pid === '374E' || pid === '374F' || pid === '3753' || pid === '3754') {
+      return `ST-Link V2/V3 (${vid}:${pid})`;
+    }
+    if (pid === 'DF11') {
+      return `STM32 Bootloader (DFU) (${vid}:${pid})`;
+    }
+  }
+  
+  return `USB Device (${vid}:${pid})`;
 }

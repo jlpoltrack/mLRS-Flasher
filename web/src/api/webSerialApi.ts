@@ -179,10 +179,18 @@ export const api = {
       }
     }
 
-    if (chipset === 'stm32' && flashmethod === 'dfu') {
+    if (chipset === 'stm32' && (flashmethod === 'dfu' || flashmethod === 'stlink')) {
+      // for USB-based methods (DFU, ST-Link), port argument might already be the USBDevice object
+      if (options.port && typeof options.port !== 'string' && 'vendorId' in (options.port as any)) {
+          return flash(options.port as unknown as USBDevice, data, flasherOptions);
+      }
+
       // use selected usb device or find by name
       const activeDevice = getSelectedUSBDevice() || await findUSBDeviceByName(options.usbDeviceName || '');
-      if (!activeDevice) throw new Error("No USB device selected for DFU. Please click 'Add Device' to authorize.");
+      if (!activeDevice) {
+          const methodLabel = flashmethod === 'stlink' ? 'ST-Link' : 'DFU';
+          throw new Error(`No USB device selected for ${methodLabel}. Please click 'Add Device' to authorize.`);
+      }
       return flash(activeDevice, data, flasherOptions);
     } else {
       // use selected port or find by name

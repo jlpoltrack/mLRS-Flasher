@@ -6,6 +6,7 @@ import { FlasherStateMachine } from './flasherStateMachine';
 import { parseHex } from './hexParser';
 import { getPageSize, isKnownChip, FLASH_BASE, MAX_FLASH_SIZE } from './chipConstants';
 import { Stm32UartProtocol } from './stm32UartProtocol';
+import { StlinkDevice, FlashOperations } from './stlink';
 
 
 const resolveAssetPath = (path: string) => {
@@ -47,6 +48,9 @@ export async function flash(
     const isUSB = 'productId' in port && 'vendorId' in port && !('getInfo' in port);
 
     if (isUSB) {
+        if (flashMethod === 'stlink') {
+            return flashSTM32SWD(port as USBDevice, firmwareData, options);
+        }
         return flashSTM32DFU(port as USBDevice, firmwareData, options);
     } else {
         if (flashMethod === 'appassthru') {
@@ -398,6 +402,108 @@ async function flashESP(
   } catch (err) {
     sm.transition('ERROR', `Error during ESP flash: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
+  }
+}
+
+async function flashSTM32SWD(
+  device: USBDevice,
+  firmwareData: ArrayBuffer,
+  options: FlasherOptions
+): Promise<void> {
+  const sm = new FlasherStateMachine(options.onProgress, options.onLog);
+  sm.transition('CONNECTING', "Connecting to ST-Link...");
+
+  let binaryData = new Uint8Array(firmwareData);
+  let startAddress = FLASH_BASE; // Default to 0x08000000
+
+  // HEX Processing
+  if (options.filename?.toLowerCase().endsWith('.hex')) {
+      sm.log("Converting Intel HEX to binary...");
+      const decoder = new TextDecoder('utf-8');
+      const hexString = decoder.decode(firmwareData);
+      
+      try {
+          const blocks = parseHex(hexString);
+          blocks.sort((a, b) => a.address - b.address);
+          
+          if (blocks.length > 0) {
+              startAddress = blocks[0].address;
+              const lastBlock = blocks[blocks.length - 1];
+              const endAddr = lastBlock.address + lastBlock.data.length;
+              const totalLen = endAddr - startAddress;
+
+              // Safety check: Don't allocate massive buffers if there's a huge gap (e.g. > 2MB)
+              if (totalLen > 2 * 1024 * 1024) {
+                   throw new Error("HEX file content spans too large a memory range. Please use a contiguous firmware file.");
+              }
+
+              const combined = new Uint8Array(totalLen);
+              combined.fill(0xFF); // Fill with erased state (0xFF)
+
+              for (const block of blocks) {
+                  const offset = block.address - startAddress;
+                  combined.set(block.data, offset);
+              }
+
+              binaryData = combined;
+              sm.log(`HEX converted: ${binaryData.byteLength} bytes at 0x${startAddress.toString(16)} (padded with 0xFF)`);
+          } else {
+              throw new Error("HEX file is empty");
+          }
+      } catch (e) {
+          throw new Error(`Failed to parse HEX file: ${e instanceof Error ? e.message : String(e)}`);
+      }
+  }
+
+  // ST-Link Operation
+  const stlink = new StlinkDevice(device, (level, msg) => {
+      // Map STLink logs to state machine logs
+      if (level === 'error') sm.log(`Error: ${msg}`);
+      else if (level === 'warn') sm.log(`Warning: ${msg}`);
+      else sm.log(msg);
+  });
+
+  try {
+      await stlink.connect();
+      sm.log("ST-Link connected.");
+      
+      const chip = stlink.chipInfo;
+      if (chip) {
+          sm.log(`Detected Chip: ${chip.devType} (Flash: ${stlink.flashSize/1024}KB, Page: ${chip.flashPageSize}B)`);
+      } else {
+          sm.log(`Warning: Unknown Chip ID 0x${stlink.chipId.toString(16)}`);
+      }
+
+      sm.transition('WRITING', "Starting flash operation...");
+      
+      const flashOps = new FlashOperations(stlink, (level, msg) => {
+           if (level === 'error') sm.log(`Flash Error: ${msg}`);
+           else sm.log(msg); // Flash ops logs are verbose, maybe filter?
+      });
+
+      // flashFirmware handles Unlock -> Erase -> Program -> Verify -> Reset
+      await flashOps.flashFirmware(
+          startAddress, 
+          binaryData, 
+          chip ? chip.flashPageSize : 1024, // Default to 1KB if unknown
+          (percent, status) => {
+              sm.updateProgress(percent);
+              // Simple mapping of progress to state
+              if (percent < 30 && sm['state'] !== 'ERASING') sm.transition('ERASING', status);
+              else if (percent >= 30 && percent < 70 && sm['state'] !== 'WRITING') sm.transition('WRITING', status);
+              else if (percent >= 70 && sm['state'] !== 'VERIFYING') sm.transition('VERIFYING', status);
+          }
+      );
+
+      sm.transition('DONE', "ST-Link Flash Complete! Device reset.");
+
+  } catch (err) {
+      sm.transition('ERROR', `Error during ST-Link flash: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+  } finally {
+      try {
+          await stlink.disconnect();
+      } catch (e) { /* ignore disconnect errors */ }
   }
 }
 
