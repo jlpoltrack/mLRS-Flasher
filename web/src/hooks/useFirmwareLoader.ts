@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api/webSerialApi';
+import {
+  listPorts,
+  requestPort,
+  forgetAllPorts,
+  listUSBDevices,
+  requestUSBDevice,
+} from '../api/hardwareService';
 import type { FirmwareFile } from '../types';
 
 /**
@@ -130,12 +137,12 @@ export function useSerialPorts(isPaused = false) {
       let result;
       let newPort: string | null = null;
       if (request) {
-        // Trigger browser picker
-        newPort = await api.requestPort(); 
-        // Then list all available ports
-        result = await api.listPorts();
+        // trigger browser picker
+        newPort = await requestPort(); 
+        // then list all available ports
+        result = await listPorts();
       } else {
-        result = await api.listPorts();
+        result = await listPorts();
       }
       
       if (!isMountedRef.current) return;
@@ -163,7 +170,7 @@ export function useSerialPorts(isPaused = false) {
         }
 
         // Try to auto-select ArduPilot
-        const ardupilotPort = newPorts.find(p => p.includes('ArduPilot'));
+        const ardupilotPort = newPorts.find((p: string) => p.includes('ArduPilot'));
         if (ardupilotPort) return ardupilotPort;
 
         // Fallback to first available
@@ -195,7 +202,7 @@ export function useSerialPorts(isPaused = false) {
   }, [refreshPorts, isPaused]);
 
   const forgetAll = useCallback(async () => {
-      await api.forgetAllPorts();
+      await forgetAllPorts();
       refreshPorts({ silent: true }); // Silent refresh to update list
   }, [refreshPorts]);
 
@@ -232,13 +239,13 @@ export function useUSBDevices(_isPaused = false) {
     try {
       let result;
       if (request) {
-        const name = await api.requestUSBDevice();
-        result = await api.listUSBDevices();
+        const name = await requestUSBDevice();
+        result = await listUSBDevices();
         if (name && isMountedRef.current) {
           setSelectedUSBDevice(name);
         }
       } else {
-        result = await api.listUSBDevices();
+        result = await listUSBDevices();
       }
       
       if (!isMountedRef.current) return;

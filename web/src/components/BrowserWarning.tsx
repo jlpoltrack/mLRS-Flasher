@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../api/webSerialApi';
+import { isSupported as checkBrowserSupport } from '../api/hardwareService';
 import './browserWarning.css';
 
 const BrowserWarning: React.FC = () => {
@@ -7,7 +7,7 @@ const BrowserWarning: React.FC = () => {
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    setIsSupported(api.isSupported());
+    setIsSupported(checkBrowserSupport());
   }, []);
 
   if (isSupported || !isVisible) {
