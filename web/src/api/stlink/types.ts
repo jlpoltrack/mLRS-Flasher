@@ -60,7 +60,7 @@ export type FlashType = (typeof FlashType)[keyof typeof FlashType];
 
 // flash driver configuration
 export interface FlashDriverConfig {
-  type: 'F1' | 'F3' | 'L4';
+  type: 'F1' | 'F3' | 'G4/L4/WL';
   registerBase: number;
   crOffset: number;
   srOffset: number;

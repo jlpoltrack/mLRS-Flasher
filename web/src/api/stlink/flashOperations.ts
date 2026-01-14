@@ -20,6 +20,20 @@ const FLASH_CR_LOCK_L4 = 0x80000000; // lock (l4/g4/wl - bit 31)
 const FLASH_SR_BSY = 0x0001;     // busy (f1/f3)
 const FLASH_SR_BSY_L4 = 0x10000; // busy (l4/g4/wl - bit 16)
 
+// flash error bits (f1/f3)
+const FLASH_SR_PGERR = 0x0004;    // programming error
+const FLASH_SR_WRPRTERR = 0x0010; // write protection error
+
+// flash error bits (l4/g4/wl)
+const FLASH_SR_OPERR = 0x0002;    // operation error
+const FLASH_SR_PROGERR = 0x0008;  // programming error
+const FLASH_SR_WRPERR = 0x0010;   // write protection error
+const FLASH_SR_PGAERR = 0x0020;   // programming alignment error
+const FLASH_SR_SIZERR = 0x0040;   // size error
+const FLASH_SR_PGSERR = 0x0080;   // programming sequence error
+const FLASH_SR_MISERR = 0x0100;   // fast programming data miss error
+const FLASH_SR_FASTERR = 0x4000;  // fast programming error
+
 // progress callback type
 export type ProgressCallback = (percent: number, status: string) => void;
 
@@ -94,6 +108,29 @@ export class FlashOperations {
   }
 
   /**
+   * check for flash errors
+   */
+  private async checkFlashErrors(): Promise<void> {
+    const srReg = this.config.registerBase + this.config.srOffset;
+    const status = await this.readFlashReg(srReg);
+
+    if (this.config.type === 'F1' || this.config.type === 'F3') {
+      if (status & FLASH_SR_WRPRTERR) throw new Error('Flash Error: Write Protection (WRPRTERR)');
+      if (status & FLASH_SR_PGERR) throw new Error('Flash Error: Programming (PGERR)');
+    } else {
+      // L4/G4/WL
+      if (status & FLASH_SR_OPERR) throw new Error('Flash Error: Operation (OPERR)');
+      if (status & FLASH_SR_PROGERR) throw new Error('Flash Error: Programming (PROGERR)');
+      if (status & FLASH_SR_WRPERR) throw new Error('Flash Error: Write Protection (WRPERR)');
+      if (status & FLASH_SR_PGAERR) throw new Error('Flash Error: Alignment (PGAERR)');
+      if (status & FLASH_SR_SIZERR) throw new Error('Flash Error: Size (SIZERR)');
+      if (status & FLASH_SR_PGSERR) throw new Error('Flash Error: Sequence (PGSERR)');
+      if (status & FLASH_SR_MISERR) throw new Error('Flash Error: Data Miss (MISERR)');
+      if (status & FLASH_SR_FASTERR) throw new Error('Flash Error: Fast Program (FASTERR)');
+    }
+  }
+
+  /**
    * wait for flash operation to complete
    */
   private async waitFlashBusy(timeout = 10000): Promise<void> {
@@ -106,10 +143,8 @@ export class FlashOperations {
       const status = await this.readFlashReg(srReg);
 
       if (!(status & bsyBit)) {
-        // check for errors (simplified for now, need specific bits per family ideally)
-        // F1: PGERR(2), WRPRTERR(4)
-        // L4: PROGERR(3), WRPERR(4), PGAERR(5), SIZERR(6), PGSERR(7)
-        // For now, just checking BSY is clear. Robust error checking would need per-family constants.
+        // operation complete, check for errors
+        await this.checkFlashErrors();
         return;
       }
 

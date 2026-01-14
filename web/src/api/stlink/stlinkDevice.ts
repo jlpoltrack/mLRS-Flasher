@@ -159,9 +159,9 @@ export class StlinkDevice {
       throw new Error('Version not read');
     }
 
-    // set swd frequency for v2 (950 khz default)
+    // set swd frequency for v2 (1000 khz default)
     if (this._version.apiVersion === 2) {
-      await this.setSwdFrequency(950);
+      await this.setSwdFrequency(1000);
     }
 
     // handle connect under reset

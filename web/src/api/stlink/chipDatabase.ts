@@ -168,7 +168,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO | ChipFlags.DualBank,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -192,7 +192,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -216,7 +216,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -240,7 +240,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -264,7 +264,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -288,7 +288,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -312,7 +312,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x04,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x40022000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -336,7 +336,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x10,
     flags: ChipFlags.SWO | ChipFlags.DualBank,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x58004000,
       crOffset: 0x14,
       srOffset: 0x10,
@@ -360,7 +360,7 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionSize: 0x10,
     flags: ChipFlags.SWO,
     flashConfig: {
-      type: 'L4',
+      type: 'G4/L4/WL',
       registerBase: 0x58004000,
       crOffset: 0x14,
       srOffset: 0x10,
