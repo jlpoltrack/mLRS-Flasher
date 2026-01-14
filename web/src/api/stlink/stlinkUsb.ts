@@ -11,6 +11,21 @@ import {
 import type { StlinkVersion, LogCallback } from './types';
 import { StlinkMode } from './types';
 
+// default timeout for usb transfers (ms)
+const USB_TRANSFER_TIMEOUT = 5000;
+
+/**
+ * wrap a promise with a timeout
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`USB ${operation} timeout after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 // st-link usb vendor id
 export const STLINK_VID = 0x0483;
 
@@ -178,10 +193,11 @@ export class StlinkUsb {
     const cmdBuf = new Uint8Array(STLINK_CMD_SIZE);
     cmdBuf.set(cmd.slice(0, STLINK_CMD_SIZE));
 
-    // send command
-    const outResult = await this.device.transferOut(
-      this.epOut.endpointNumber,
-      cmdBuf
+    // send command with timeout protection
+    const outResult = await withTimeout(
+      this.device.transferOut(this.epOut.endpointNumber, cmdBuf),
+      USB_TRANSFER_TIMEOUT,
+      'command out'
     );
     if (outResult.status !== 'ok') {
       throw new Error(`USB transfer out failed: ${outResult.status}`);
@@ -189,9 +205,10 @@ export class StlinkUsb {
 
     // receive response if expected
     if (rxLen > 0) {
-      const inResult = await this.device.transferIn(
-        this.epIn.endpointNumber,
-        rxLen
+      const inResult = await withTimeout(
+        this.device.transferIn(this.epIn.endpointNumber, rxLen),
+        USB_TRANSFER_TIMEOUT,
+        'command in'
       );
       if (inResult.status !== 'ok') {
         throw new Error(`USB transfer in failed: ${inResult.status}`);
@@ -216,9 +233,10 @@ export class StlinkUsb {
     const buffer = new ArrayBuffer(data.length);
     new Uint8Array(buffer).set(data);
     
-    const result = await this.device.transferOut(
-      this.epOut.endpointNumber,
-      buffer
+    const result = await withTimeout(
+      this.device.transferOut(this.epOut.endpointNumber, buffer),
+      USB_TRANSFER_TIMEOUT,
+      'data out'
     );
     if (result.status !== 'ok') {
       throw new Error(`USB data transfer out failed: ${result.status}`);
@@ -233,7 +251,11 @@ export class StlinkUsb {
       throw new Error('Device not opened');
     }
 
-    const result = await this.device.transferIn(this.epIn.endpointNumber, len);
+    const result = await withTimeout(
+      this.device.transferIn(this.epIn.endpointNumber, len),
+      USB_TRANSFER_TIMEOUT,
+      'data in'
+    );
     if (result.status !== 'ok') {
       throw new Error(`USB data transfer in failed: ${result.status}`);
     }

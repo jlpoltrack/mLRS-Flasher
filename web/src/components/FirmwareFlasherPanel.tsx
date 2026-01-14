@@ -71,7 +71,7 @@ function FirmwareFlasherPanel({
     selectedStlink,
     isScanningStlink,
     refreshStlinks,
-  } = useStlinkDevices(isFlashing);
+  } = useStlinkDevices();
 
   // set default selections when data loads
   useDefaultSelection(devices, selectedDevice, setSelectedDevice);

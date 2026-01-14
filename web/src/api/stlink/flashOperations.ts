@@ -2,7 +2,8 @@
 // date: 2026-01-14
 
 import { StlinkDevice } from './stlinkDevice';
-import type { LogCallback, FlashDriverConfig } from './types';
+import type { LogCallback, ProgressCallback, FlashDriverConfig } from './types';
+import { FLASH_BASE } from './chipDatabase';
 
 // flash keys (same for all stm32 families)
 const FLASH_KEY1 = 0x45670123;
@@ -33,9 +34,6 @@ const FLASH_SR_SIZERR = 0x0040;   // size error
 const FLASH_SR_PGSERR = 0x0080;   // programming sequence error
 const FLASH_SR_MISERR = 0x0100;   // fast programming data miss error
 const FLASH_SR_FASTERR = 0x4000;  // fast programming error
-
-// progress callback type
-export type ProgressCallback = (percent: number, status: string) => void;
 
 /**
  * flash programmer for stm32 via st-link/swd
@@ -206,8 +204,7 @@ export class FlashOperations {
     } else if (this.config.eraseMethod === 'CR_PNB') {
       // L4/G4/WL Method: CR_PER | (PNB << shift) -> CR_STRT
       // calculate page index. Address relative to flash base / page size.
-      // Assuming flash starts at 0x08000000.
-      const pageIndex = Math.floor((pageAddress - 0x08000000) / this.device.chipInfo!.flashPageSize);
+      const pageIndex = Math.floor((pageAddress - FLASH_BASE) / this.device.chipInfo!.flashPageSize);
       const shift = this.config.pnbShift || 3;
       
       const crVal = FLASH_CR_PER | (pageIndex << shift);

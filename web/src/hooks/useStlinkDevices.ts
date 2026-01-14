@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { requestStlinkDevice, getPairedStlinkDevices } from '../api/stlink';
 
-export function useStlinkDevices(_isFlashing: boolean) {
+export function useStlinkDevices() {
   const [stlinkDevices, setStlinkDevices] = useState<USBDevice[]>([]);
   const [selectedStlink, setSelectedStlink] = useState<USBDevice | null>(null);
   const [isScanningStlink, setIsScanningStlink] = useState(false);
