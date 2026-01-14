@@ -29,6 +29,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F1',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 16,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32f1xx high density (f103rc, f103re, etc.)
@@ -44,6 +52,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F1',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 16,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32f1xx low density (f103x4, f103x6)
@@ -59,6 +75,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F1',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 16,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32f3xx (f302xb/c, f303xb/c, f358)
@@ -74,6 +98,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F3',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 32,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32f3xx (f301x6/8, f302x6/8, f318)
@@ -89,6 +121,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F3',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 32,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32f3xx hd (f302xd/e, f303xd/e, f398)
@@ -104,6 +144,14 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'F3',
+      registerBase: 0x40022000,
+      crOffset: 0x10,
+      srOffset: 0x0c,
+      programWidth: 32,
+      eraseMethod: 'AR',
+    },
   },
 
   // stm32g4xx cat3 (g47x, g48x)
@@ -119,6 +167,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x04,
     flags: ChipFlags.SWO | ChipFlags.DualBank,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32g4xx cat2 (g43x, g44x)
@@ -134,6 +191,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32g4xx cat4 (g49x, g4ax)
@@ -149,6 +215,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1ffff800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32l4xx (l47x, l48x)
@@ -164,6 +239,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32l4xx (l41x, l42x)
@@ -179,6 +263,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32l4xx (l43x, l44x)
@@ -194,6 +287,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32l4xx (l45x, l46x)
@@ -209,6 +311,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x04,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x40022000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32wlex
@@ -224,6 +335,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x10,
     flags: ChipFlags.SWO | ChipFlags.DualBank,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x58004000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 
   // stm32wl3x (lower capacity wl)
@@ -239,6 +359,15 @@ export const CHIP_DATABASE: ChipInfo[] = [
     optionBase: 0x1fff7800,
     optionSize: 0x10,
     flags: ChipFlags.SWO,
+    flashConfig: {
+      type: 'L4',
+      registerBase: 0x58004000,
+      crOffset: 0x14,
+      srOffset: 0x10,
+      programWidth: 64,
+      eraseMethod: 'CR_PNB',
+      pnbShift: 3,
+    },
   },
 ];
 

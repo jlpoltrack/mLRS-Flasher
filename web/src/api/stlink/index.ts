@@ -34,3 +34,6 @@ export {
 
 // device interface
 export { StlinkDevice } from './stlinkDevice';
+
+// flash operations
+export { FlashOperations } from './flashOperations';

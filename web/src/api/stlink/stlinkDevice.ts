@@ -12,13 +12,15 @@ import {
   STLINK_DEBUG_FORCEDEBUG,
   STLINK_DEBUG_GETSTATUS,
   STLINK_DEBUG_RUNCORE,
-  STLINK_DEBUG_APIV2_RESETSYS,
+  STLINK_DEBUG_APIV1_RESETSYS,
   STLINK_DEBUG_APIV2_DRIVE_NRST,
   STLINK_DEBUG_APIV2_DRIVE_NRST_LOW,
   STLINK_DEBUG_APIV2_DRIVE_NRST_HIGH,
   STLINK_DEBUG_APIV2_DRIVE_NRST_PULSE,
   STLINK_DEBUG_READMEM_32BIT,
   STLINK_DEBUG_WRITEMEM_32BIT,
+  STLINK_DEBUG_READMEM_16BIT,
+  STLINK_DEBUG_WRITEMEM_16BIT,
   STLINK_DEBUG_WRITEMEM_8BIT,
   STLINK_DEBUG_APIV2_READDEBUGREG,
   STLINK_DEBUG_APIV2_WRITEDEBUGREG,
@@ -50,7 +52,14 @@ const DHCSR = 0xe000edf0;
 const DHCSR_DBGKEY = 0xa05f0000;
 const DHCSR_C_HALT = 0x00000002;
 const DHCSR_C_DEBUGEN = 0x00000001;
-// note: DHCSR_S_HALT, DHCSR_S_REGRDY, DEMCR, AIRCR etc. reserved for future use
+// const DHCSR_C_MASKINTS = 0x00000004; // reserved for flash loader
+const DHCSR_S_HALT = 0x00020000;
+const DHCSR_S_RESET_ST = 0x02000000;
+
+// cortex-m reset control register
+const AIRCR = 0xe000ed0c;
+const AIRCR_VECTKEY = 0x05fa0000;
+const AIRCR_SYSRESETREQ = 0x00000004;
 
 /**
  * high-level interface to st-link device
@@ -344,6 +353,18 @@ export class StlinkDevice {
    */
   async run(): Promise<void> {
     this.log('debug', 'Running CPU...');
+
+    if (!this._version) {
+      throw new Error('Version not read');
+    }
+
+    // for api v2/v3, use dhcsr register write (clears halt bit)
+    if (this._version.apiVersion >= 2) {
+      await this.writeDebugReg(DHCSR, DHCSR_DBGKEY | DHCSR_C_DEBUGEN);
+      return;
+    }
+
+    // api v1 uses legacy command
     const cmd = new Uint8Array([STLINK_DEBUG_COMMAND, STLINK_DEBUG_RUNCORE]);
     const response = await this.usb.sendCommand(cmd, 2);
     this.checkStatus(response);
@@ -359,9 +380,48 @@ export class StlinkDevice {
       throw new Error('Version not read');
     }
 
+    // for api v2/v3, use aircr register to trigger system reset
+    if (this._version.apiVersion >= 2) {
+      // halt first to ensure we can regain control after reset
+      try {
+        await this.halt();
+      } catch (e) {
+        this.log('warn', `Could not halt before reset: ${e}`);
+      }
+
+      // try aircr software reset first
+      this.log('debug', 'Resetting via AIRCR...');
+      await this.writeDebugReg(AIRCR, AIRCR_VECTKEY | AIRCR_SYSRESETREQ);
+      
+      // wait a bit and check if reset happened
+      await this.delay(50);
+      
+      try {
+        const dhcsr = await this.readDebugReg(DHCSR);
+        if (dhcsr & DHCSR_S_RESET_ST) {
+           this.log('debug', 'System reset detected via DHCSR');
+           return;
+        }
+      } catch {
+         // ignore read error during reset
+      }
+
+      // if aircr didn't work (or we couldn't verify), try pulse nrst
+      this.log('debug', 'Pulsing NRST...');
+      try {
+        await this.pulseNrst();
+      } catch {
+        this.log('warn', 'NRST pulse failed (feature might not be supported)');
+      }
+      
+      await this.delay(100);
+      return;
+    }
+
+    // api v1 uses legacy command
     const cmd = new Uint8Array([
       STLINK_DEBUG_COMMAND,
-      STLINK_DEBUG_APIV2_RESETSYS,
+      STLINK_DEBUG_APIV1_RESETSYS,
     ]);
     const response = await this.usb.sendCommand(cmd, 2);
     this.checkStatus(response);
@@ -373,6 +433,24 @@ export class StlinkDevice {
    * get current target status
    */
   async getStatus(): Promise<TargetState> {
+    if (!this._version) {
+      throw new Error('Version not read');
+    }
+
+    // for api v2/v3, read dhcsr register directly
+    if (this._version.apiVersion >= 2) {
+      const dhcsr = await this.readDebugReg(DHCSR);
+      this.log('debug', `DHCSR: 0x${dhcsr.toString(16)}`);
+
+      if (dhcsr & DHCSR_S_HALT) {
+        return TargetState.Halted;
+      } else if (dhcsr & DHCSR_S_RESET_ST) {
+        return TargetState.Unknown; // reset state
+      }
+      return TargetState.Running;
+    }
+
+    // api v1 uses legacy command
     const cmd = new Uint8Array([STLINK_DEBUG_COMMAND, STLINK_DEBUG_GETSTATUS]);
     const response = await this.usb.sendCommand(cmd, 2);
 
@@ -441,6 +519,72 @@ export class StlinkDevice {
     const cmd = new Uint8Array(16);
     cmd[0] = STLINK_DEBUG_COMMAND;
     cmd[1] = STLINK_DEBUG_WRITEMEM_32BIT;
+    cmd[2] = addr & 0xff;
+    cmd[3] = (addr >> 8) & 0xff;
+    cmd[4] = (addr >> 16) & 0xff;
+    cmd[5] = (addr >> 24) & 0xff;
+    cmd[6] = len & 0xff;
+    cmd[7] = (len >> 8) & 0xff;
+
+    // send command
+    await this.usb.sendCommand(cmd, 0);
+
+    // send data
+    await this.usb.sendData(data);
+  }
+
+  /**
+   * read 16-bit aligned memory
+   */
+  async readMem16(addr: number, len: number): Promise<Uint8Array> {
+    // must be 2-byte aligned
+    if (addr & 1) {
+      throw new Error('Address must be 2-byte aligned');
+    }
+    if (len & 1) {
+      len = (len + 1) & ~1; // round up
+    }
+
+    const cmd = new Uint8Array(16);
+    cmd[0] = STLINK_DEBUG_COMMAND;
+    cmd[1] = STLINK_DEBUG_READMEM_16BIT;
+    cmd[2] = addr & 0xff;
+    cmd[3] = (addr >> 8) & 0xff;
+    cmd[4] = (addr >> 16) & 0xff;
+    cmd[5] = (addr >> 24) & 0xff;
+    cmd[6] = len & 0xff;
+    cmd[7] = (len >> 8) & 0xff;
+
+    // send command (no immediate response data)
+    await this.usb.sendCommand(cmd, 0);
+
+    // receive data
+    const data = await this.usb.receiveData(len);
+
+    return data;
+  }
+
+  /**
+   * write 16-bit aligned memory
+   */
+  async writeMem16(addr: number, data: Uint8Array): Promise<void> {
+    if (addr & 1) {
+      throw new Error('Address must be 2-byte aligned');
+    }
+    
+    // pad to even length
+    if (data.length & 1) {
+      const padded = new Uint8Array(data.length + 1);
+      padded.set(data);
+      padded[data.length] = 0; // pad with 0
+      data = padded;
+    }
+
+    const len = data.length;
+
+    const cmd = new Uint8Array(16);
+    cmd[0] = STLINK_DEBUG_COMMAND;
+    cmd[1] = STLINK_DEBUG_WRITEMEM_16BIT;
     cmd[2] = addr & 0xff;
     cmd[3] = (addr >> 8) & 0xff;
     cmd[4] = (addr >> 16) & 0xff;

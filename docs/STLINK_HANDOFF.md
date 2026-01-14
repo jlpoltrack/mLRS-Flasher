@@ -1,7 +1,7 @@
 # ST-Link TypeScript Implementation - Handoff Document
 
 **Date:** 2026-01-14  
-**Status:** Phase 1 Complete (Core USB Layer)  
+**Status:** Phase 2 Complete (Flash Operations)  
 **Repository:** mLRS-Flasher
 
 ---
@@ -19,9 +19,9 @@ Based on [stlink-org/stlink](https://github.com/stlink-org/stlink) C library.
 
 ---
 
-## Completed Work (Phase 1)
+## Completed Work
 
-### Files Created
+### Phase 1: Core USB Layer (Complete)
 
 All new files are in `web/src/api/stlink/`:
 
@@ -33,6 +33,26 @@ All new files are in `web/src/api/stlink/`:
 | `stlinkUsb.ts` | Low-level WebUSB communication class |
 | `stlinkDevice.ts` | High-level device interface (connect, halt, run, reset, memory access) |
 | `chipDatabase.ts` | Chip definitions for F1, F3, G4, L4, WLE5 families |
+
+### Phase 2: Flash Operations (Complete)
+
+| File | Description |
+|------|-------------|
+| `flashOperations.ts` | Unified flash driver logic (unlock, erase, program, verify) |
+
+**Key Achievements:**
+- **Unified Driver Architecture:** Implemented a configuration-based driver that handles register offset differences and programming widths across families.
+- **STM32F1/F3 Support:** Implemented 16-bit/32-bit programming and AR-based page erasing.
+- **STM32L4/G4/WL Support:** Implemented 64-bit double-word programming and CR-PNB-based page erasing.
+- **Robust Reset:** Implemented a multi-stage reset strategy (Software AIRCR -> Verify -> Hardware NRST pulse) to ensure reliable resetting of stubborn targets (validated on L4).
+- **Validation:**
+  - ✅ **STM32F1:** Verified 16-bit writes.
+  - ✅ **STM32L4:** Verified 64-bit writes and Reset logic.
+  - ✅ **STM32WLE5:** Verified correct Flash Register offsets (0x14/0x10).
+  - ⏳ **STM32G4/F3:** Covered by shared driver architecture.
+
+**Optimizations:**
+- Increased verification chunk size to 4KB (from 256B) to maximize USB bandwidth.
 
 ### Test Page
 
@@ -56,6 +76,7 @@ web/src/api/stlink/
 ├── stlinkDevice.ts       # high-level device interface
 ├── stlinkUsb.ts          # webusb communication layer
 ├── chipDatabase.ts       # chip definitions and lookup
+├── flashOperations.ts    # flash programming logic
 └── types.ts              # typescript interfaces
 ```
 
@@ -74,84 +95,28 @@ web/src/api/stlink/
 - `halt()` / `run()` / `reset()` - CPU control
 - `getStatus()` - Get running/halted state
 - `readMem32()` / `writeMem32()` - Memory access
+- `writeMem16()` - 16-bit memory access (required for F1 flash)
 - `readDebugReg()` / `writeDebugReg()` - Debug register access
 
----
-
-## Chip Database
-
-Definitions for the target MCU families:
-
-| Chip ID | Device Type | Flash Type | Page Size |
-|---------|------------|------------|-----------|
-| 0x410 | STM32F1xx_MD | F0_F1_F3 | 1KB |
-| 0x414 | STM32F1xx_HD | F0_F1_F3 | 2KB |
-| 0x422 | STM32F302_F303_358 | F0_F1_F3 | 2KB |
-| 0x469 | STM32G47x_G48x | G4 | 2KB |
-| 0x468 | STM32G43x_G44x | G4 | 2KB |
-| 0x415 | STM32L47x_L48x | L4 | 2KB |
-| 0x497 | STM32WLEx | WB_WL | 2KB |
-
-Additional L4 variants (L41x, L42x, L43x, L44x, L45x, L46x) also included.
-
----
-
-## How to Test
-
-1. Run development server:
-   ```bash
-   cd web
-   npm run dev
-   ```
-
-2. Open http://localhost:5173/mLRS-Flasher/
-
-3. Navigate to **"SWD Test"** tab (wrench icon)
-
-4. Connect ST-Link V3 to computer and F103 target
-
-5. Click **"Select Device"** to pair via WebUSB
-
-6. Click **"Connect"** to:
-   - Open USB connection
-   - Enter SWD mode
-   - Detect chip
-   - Read flash size and voltage
-
-7. Test buttons:
-   - **Halt** - Stop CPU
-   - **Run** - Resume CPU
-   - **Reset** - Reset target
-   - **Read Flash** - Read first 64 bytes at 0x08000000
+**FlashOperations** - High-level flash controller:
+- `flashFirmware()` - Orchestrates full unlock-erase-program-verify-reset cycle.
+- `programFlash()` - Handles 16/32/64-bit writes based on chip config.
+- `erasePages()` - Handles AR vs CR_PNB erase methods.
 
 ---
 
 ## Remaining Work
 
-### Phase 2: Flash Operations (Next)
+### Phase 3: Integration (Next)
 
-Create `flashOperations.ts` with:
+The final step is to integrate the ST-Link logic into the main application flow.
 
-- `unlockFlash()` / `lockFlash()` - Flash access control
-- `isFlashBusy()` / `waitFlashBusy()` - Status polling
-- `clearFlashErrors()` - Error handling
-- `erasePage(addr)` - Single page erase
-- `eraseSection(addr, size)` - Section erase
-- `eraseMass()` - Full chip erase
-- `programFlash(addr, data, onProgress)` - Flash programming
-- `verifyFlash(addr, data)` - Verification
-
-Flash type-specific implementations needed for:
-- **F0_F1_F3:** Simple half-word programming (easiest)
-- **G4:** 72-bit wide, dual bank
-- **L4:** 72-bit wide, dual bank
-- **WB_WL:** Similar to L4
-
-### Phase 3: Integration
-
-- Create `StlinkFlasher` class for web app integration
-- Add `flashSTM32SWD()` function to `flasher.ts`
-- UI integration in `FirmwareFlasherPanel.tsx`
+- Create `StlinkFlasher` class that implements the existing `FlasherInterface` (if applicable) or matches the pattern used by `SerialFlasher` / `DFUFlasher`.
+- Update `web/src/api/flasher.ts` to export an `flashSTM32SWD` function.
+- Update `FirmwareFlasherPanel.tsx` to:
+  - Add "ST-Link" as a connection method option.
+  - Handle ST-Link device selection and connection state.
+  - Call the SWD flashing logic when selected.
 
 ---
 
@@ -172,39 +137,20 @@ STLINK_V3S_PID = 0x374f
 STLINK_V3_2VCP_PID = 0x3753
 ```
 
-### Flash Registers (for Phase 2)
+### Flash Registers (Offsets vary by family)
 
-```typescript
-// F1 flash registers
-FLASH_BASE_F1 = 0x40022000
-FLASH_KEYR = 0x04
-FLASH_SR = 0x0C
-FLASH_CR = 0x10
-FLASH_AR = 0x14
-
-// Unlock keys
-FLASH_KEY1 = 0x45670123
-FLASH_KEY2 = 0xCDEF89AB
-```
-
-### Chip ID Locations
-
-```typescript
-CORTEXM_DBGMCU_IDCODE = 0xe0044000    // most STM32
-CORTEXM_DBGMCU_IDCODE_F1 = 0xe0042000 // F1, F3
-```
+- **F1/F3:** CR=0x10, SR=0x0C, AR=0x14
+- **L4/G4/WL:** CR=0x14, SR=0x10
 
 ---
 
 ## Notes
 
 1. **TypeScript strictness:** Project uses `erasableSyntaxOnly` so enums are not allowed. Use const objects with type unions instead.
-
 2. **WebUSB BufferSource:** When calling `transferOut`, must create explicit ArrayBuffer copy to avoid SharedArrayBuffer type issues.
-
 3. **ST-Link V3:** Uses different version command (`0xFB` instead of `0xF1`) and different response format.
-
-4. **SWD frequency:** V2 supports frequency setting via `SWD_SET_FREQ` command. Default is 950kHz.
+4. **F1 Flashing:** STM32F1 requires 16-bit (half-word) write access.
+5. **L4/WL Reset:** Requires AIRCR software reset followed by NRST pulse fallback.
 
 ---
 

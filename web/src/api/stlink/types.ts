@@ -58,6 +58,17 @@ export const FlashType = {
 } as const;
 export type FlashType = (typeof FlashType)[keyof typeof FlashType];
 
+// flash driver configuration
+export interface FlashDriverConfig {
+  type: 'F1' | 'F3' | 'L4';
+  registerBase: number;
+  crOffset: number;
+  srOffset: number;
+  programWidth: 16 | 32 | 64;
+  eraseMethod: 'AR' | 'CR_PNB';
+  pnbShift?: number; // bit shift for page number in CR (for CR_PNB method)
+}
+
 // chip information from database
 export interface ChipInfo {
   devType: string;        // e.g., "STM32F1xx_MD"
@@ -71,6 +82,7 @@ export interface ChipInfo {
   optionBase: number;     // option bytes base
   optionSize: number;     // option bytes size
   flags: number;          // bitmask of ChipFlags
+  flashConfig: FlashDriverConfig;
 }
 
 // stlink capability flags (from firmware version)

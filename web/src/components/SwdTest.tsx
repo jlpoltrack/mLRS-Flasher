@@ -1,8 +1,8 @@
 // swd debug/test page for st-link validation
 // date: 2026-01-14
 
-import { useState, useCallback } from 'react';
-import { Usb, RefreshCw, Zap, Info, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Usb, RefreshCw, Zap, Info, CheckCircle, XCircle, AlertCircle, Upload, HardDrive } from 'lucide-react';
 import type { StlinkVersion, ChipInfo } from '../api/stlink';
 import {
   StlinkDevice,
@@ -10,7 +10,9 @@ import {
   getPairedStlinkDevices,
   TargetState,
   formatChipId,
+  FlashOperations,
 } from '../api/stlink';
+import { parseHex } from '../api/hexParser';
 import './swdTest.css';
 
 interface LogItem {
@@ -37,6 +39,15 @@ function SwdTest() {
   const [chipId, setChipId] = useState(0);
   const [voltage, setVoltage] = useState(0);
   const [targetState, setTargetState] = useState<TargetState>(TargetState.Unknown);
+  
+  // firmware flashing state
+  const [firmwareFile, setFirmwareFile] = useState<File | null>(null);
+  const [firmwareData, setFirmwareData] = useState<Uint8Array | null>(null);
+  const [firmwareAddress, setFirmwareAddress] = useState(0x08000000);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [flashProgress, setFlashProgress] = useState(0);
+  const [flashStatus, setFlashStatus] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = useCallback((type: LogItem['type'], message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -220,6 +231,113 @@ function SwdTest() {
     }
   }, [device, addLog]);
 
+  // handle file selection
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setFirmwareFile(file);
+    addLog('info', `Selected file: ${file.name} (${file.size} bytes)`);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const filename = file.name.toLowerCase();
+
+      if (filename.endsWith('.hex')) {
+        // parse intel hex
+        const hexText = new TextDecoder().decode(buffer);
+        const blocks = parseHex(hexText);
+        
+        if (blocks.length === 0) {
+          throw new Error('No data found in HEX file');
+        }
+
+        // use first block's address
+        setFirmwareAddress(blocks[0].address);
+        
+        // combine all blocks into contiguous data
+        // for simplicity, assume blocks are contiguous or use first block
+        if (blocks.length === 1) {
+          setFirmwareData(blocks[0].data);
+          addLog('success', `HEX parsed: ${blocks[0].data.length} bytes at 0x${blocks[0].address.toString(16)}`);
+        } else {
+          // multiple blocks - combine them
+          const startAddr = blocks[0].address;
+          const lastBlock = blocks[blocks.length - 1];
+          const endAddr = lastBlock.address + lastBlock.data.length;
+          const totalLen = endAddr - startAddr;
+          
+          const combined = new Uint8Array(totalLen);
+          combined.fill(0xff); // pad with erased value
+          
+          for (const block of blocks) {
+            const offset = block.address - startAddr;
+            combined.set(block.data, offset);
+          }
+          
+          setFirmwareData(combined);
+          addLog('success', `HEX parsed: ${combined.length} bytes at 0x${startAddr.toString(16)} (${blocks.length} blocks)`);
+        }
+      } else if (filename.endsWith('.bin')) {
+        // binary file - assume 0x08000000
+        setFirmwareData(new Uint8Array(buffer));
+        setFirmwareAddress(0x08000000);
+        addLog('success', `Binary loaded: ${buffer.byteLength} bytes`);
+      } else if (filename.endsWith('.elf')) {
+        addLog('error', 'ELF files not yet supported. Please use HEX or BIN format.');
+        setFirmwareFile(null);
+        return;
+      } else {
+        addLog('warn', 'Unknown file format. Treating as binary.');
+        setFirmwareData(new Uint8Array(buffer));
+        setFirmwareAddress(0x08000000);
+      }
+    } catch (err) {
+      addLog('error', `Failed to parse file: ${err}`);
+      setFirmwareFile(null);
+      setFirmwareData(null);
+    }
+  }, [addLog]);
+
+  // flash firmware
+  const handleFlash = useCallback(async () => {
+    if (!device || !firmwareData || !chipInfo) {
+      addLog('error', 'Device not connected or no firmware loaded');
+      return;
+    }
+
+    setIsFlashing(true);
+    setFlashProgress(0);
+    setFlashStatus('Starting...');
+    addLog('info', `Starting flash: ${firmwareData.length} bytes at 0x${firmwareAddress.toString(16)}`);
+
+    try {
+      const flashOps = new FlashOperations(device, log);
+      
+      await flashOps.flashFirmware(
+        firmwareAddress,
+        firmwareData,
+        chipInfo.flashPageSize,
+        (percent, status) => {
+          setFlashProgress(percent);
+          setFlashStatus(status);
+        }
+      );
+
+      addLog('success', 'Flash complete!');
+      setFlashStatus('Complete!');
+      
+      // refresh status
+      const state = await device.getStatus();
+      setTargetState(state);
+    } catch (err) {
+      addLog('error', `Flash failed: ${err}`);
+      setFlashStatus(`Error: ${err}`);
+    } finally {
+      setIsFlashing(false);
+    }
+  }, [device, firmwareData, firmwareAddress, chipInfo, log, addLog]);
+
   return (
     <div className="swd-test">
       <div className="swd-test-header">
@@ -327,6 +445,56 @@ function SwdTest() {
             <h3>5. Memory Access Test</h3>
             <div className="swd-buttons">
               <button onClick={handleReadMemory}>Read Flash (0x08000000)</button>
+            </div>
+          </section>
+        )}
+
+        {/* firmware flash */}
+        {isConnected && (
+          <section className="swd-section">
+            <h3>6. Firmware Flash</h3>
+            <div className="swd-firmware-section">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                accept=".hex,.bin,.elf"
+                style={{ display: 'none' }}
+              />
+              <div className="swd-buttons">
+                <button onClick={() => fileInputRef.current?.click()} disabled={isFlashing}>
+                  <Upload size={16} /> Select Firmware
+                </button>
+                <button 
+                  onClick={handleFlash} 
+                  disabled={!firmwareData || isFlashing}
+                  className="primary"
+                >
+                  <HardDrive size={16} /> {isFlashing ? 'Flashing...' : 'Flash Firmware'}
+                </button>
+              </div>
+              
+              {firmwareFile && (
+                <div className="swd-info-box">
+                  <strong>File:</strong> {firmwareFile.name}<br />
+                  <span className="swd-detail">
+                    Size: {firmwareData?.length || 0} bytes | 
+                    Address: 0x{firmwareAddress.toString(16)}
+                  </span>
+                </div>
+              )}
+              
+              {isFlashing && (
+                <div className="swd-progress">
+                  <div className="swd-progress-bar">
+                    <div 
+                      className="swd-progress-fill" 
+                      style={{ width: `${flashProgress}%` }}
+                    />
+                  </div>
+                  <span className="swd-progress-text">{flashProgress}% - {flashStatus}</span>
+                </div>
+              )}
             </div>
           </section>
         )}
