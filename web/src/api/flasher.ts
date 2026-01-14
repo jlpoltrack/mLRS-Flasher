@@ -41,8 +41,13 @@ export async function flash(
 
   if (chipset === 'stm32') {
     // In mLRS, 'stm32' can be DFU or UART depending on the target.
-    if (port instanceof USBDevice) {
-        return flashSTM32DFU(port, firmwareData, options);
+    // Check if port has 'open' method consistent with SerialPort or USBDevice
+    // USBDevice has open(), SerialPort has open({baudRate})
+    // A robust check:
+    const isUSB = 'productId' in port && 'vendorId' in port && !('getInfo' in port);
+
+    if (isUSB) {
+        return flashSTM32DFU(port as USBDevice, firmwareData, options);
     } else {
         if (flashMethod === 'appassthru') {
             if (!options.passthroughSerial) {
@@ -62,7 +67,8 @@ export async function flash(
         return flashSTM32UART(port as SerialPort, firmwareData, options);
     }
   } else if (chipset.startsWith('esp')) {
-     if (port.constructor.name !== 'SerialPort') {
+     const isSerial = 'getInfo' in port;
+     if (!isSerial) {
          throw new Error('ESP flashing requires a SerialPort');
      }
      
@@ -138,15 +144,20 @@ export async function initEdgeTXPassthrough(
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
-            const { value, done } = await Promise.race([
-                reader.read(),
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 500))
-            ]).catch(() => ({ value: null, done: false }));
+            try {
+                const { value, done } = await Promise.race([
+                    reader.read(),
+                    new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 500))
+                ]);
 
-            if (done) break;
-            if (value) {
-                response += decoder.decode(value);
-                if (response.endsWith('\r\n> ')) break;
+                if (done) break;
+                if (value) {
+                    response += decoder.decode(value);
+                    if (response.endsWith('\r\n> ')) break;
+                }
+            } catch (e) {
+                 // Timeout or read error
+                 if (response.length > 0) break; // Return what we have
             }
         }
 
@@ -218,11 +229,12 @@ async function flashESP(
   if (port.readable || port.writable) {
       try {
           await port.close(); 
-      } catch (e: any) {
-          sm.log(`Warning: Port closure check: ${e.message}`);
+      } catch (e) {
+          sm.log(`Warning: Port closure check: ${e instanceof Error ? e.message : String(e)}`);
       }
   }
 
+  // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
@@ -368,23 +380,26 @@ async function flashESP(
         const writer = port.writable!.getWriter();
         
         // toggle DTR to trigger main MCU reset
+        // @ts-ignore
         await (port as any).setSignals({ dataTerminalReady: false });
         await new Promise(r => setTimeout(r, 100));
+        // @ts-ignore
         await (port as any).setSignals({ dataTerminalReady: true });
         await new Promise(r => setTimeout(r, 100));
+        // @ts-ignore
         await (port as any).setSignals({ dataTerminalReady: false });
         
         writer.releaseLock();
         await port.close();
         sm.log("Main MCU reset complete.");
-      } catch (e: any) {
-        sm.log(`Warning: Main MCU reset failed: ${e.message}`);
+      } catch (e) {
+        sm.log(`Warning: Main MCU reset failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     
     sm.transition('DONE');
-  } catch (err: any) {
-    sm.transition('ERROR', `Error during ESP flash: ${err.message}`);
+  } catch (err) {
+    sm.transition('ERROR', `Error during ESP flash: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
 }
@@ -423,8 +438,8 @@ async function flashSTM32DFU(
 
           binaryData = combined.buffer;
           sm.log(`HEX converted: ${binaryData.byteLength} bytes from ${blocks.length} block(s)`);
-      } catch (e: any) {
-          throw new Error(`Failed to parse HEX file: ${e.message}`);
+      } catch (e) {
+          throw new Error(`Failed to parse HEX file: ${e instanceof Error ? e.message : String(e)}`);
       }
   }
   
@@ -603,8 +618,8 @@ async function flashSTM32DFU(
         await dfu.close(); 
     } catch (e) { /* ignore */ }
     
-  } catch (err: any) {
-    sm.transition('ERROR', `Error during STM32 DFU flash: ${err.message}`);
+  } catch (err) {
+    sm.transition('ERROR', `Error during STM32 DFU flash: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
 }
@@ -628,8 +643,8 @@ async function flashSTM32UART(
           memoryBlocks = parseHex(hexText);
           let totalBytes = memoryBlocks.reduce((acc, b) => acc + b.data.length, 0);
           sm.log(`HEX converted: ${totalBytes} bytes in ${memoryBlocks.length} blocks`);
-      } catch (e: any) {
-          throw new Error(`Failed to parse HEX file: ${e.message}`);
+      } catch (e) {
+          throw new Error(`Failed to parse HEX file: ${e instanceof Error ? e.message : String(e)}`);
       }
       
   } else {
@@ -759,9 +774,9 @@ async function flashSTM32UART(
     }
 
     sm.transition('DONE', "STM32 UART Flash complete!");
-  } catch (err: any) {
-    sm.transition('ERROR', `Error during STM32 UART flash: ${err.message}`);
-    if (err.message.includes("no ACK") || err.message.includes("timeout")) {
+  } catch (err) {
+    sm.transition('ERROR', `Error during STM32 UART flash: ${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof Error && (err.message.includes("no ACK") || err.message.includes("timeout"))) {
         sm.log("Hint: Check your connections and ensure the device is in bootloader mode.");
     }
     throw err;
