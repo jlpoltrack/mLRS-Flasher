@@ -389,6 +389,10 @@ export class StlinkUsb {
  */
 export async function requestStlinkDevice(): Promise<USBDevice | null> {
   try {
+    if (!navigator.usb) {
+      console.warn('WebUSB not supported in this browser');
+      return null;
+    }
     const device = await navigator.usb.requestDevice(getStlinkFilters());
     return device;
   } catch (e) {
@@ -401,6 +405,7 @@ export async function requestStlinkDevice(): Promise<USBDevice | null> {
  * get already-paired st-link devices
  */
 export async function getPairedStlinkDevices(): Promise<USBDevice[]> {
+  if (!navigator.usb) return [];
   const devices = await navigator.usb.getDevices();
   return devices.filter(isStlinkDevice);
 }

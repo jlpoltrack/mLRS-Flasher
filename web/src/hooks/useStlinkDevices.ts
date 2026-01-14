@@ -45,12 +45,16 @@ export function useStlinkDevices(_isFlashing: boolean) {
     const handleConnect = () => refreshStlinks();
     const handleDisconnect = () => refreshStlinks();
     
-    navigator.usb.addEventListener('connect', handleConnect);
-    navigator.usb.addEventListener('disconnect', handleDisconnect);
+    if (navigator.usb) {
+      navigator.usb.addEventListener('connect', handleConnect);
+      navigator.usb.addEventListener('disconnect', handleDisconnect);
+    }
     
     return () => {
-      navigator.usb.removeEventListener('connect', handleConnect);
-      navigator.usb.removeEventListener('disconnect', handleDisconnect);
+      if (navigator.usb) {
+        navigator.usb.removeEventListener('connect', handleConnect);
+        navigator.usb.removeEventListener('disconnect', handleDisconnect);
+      }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
