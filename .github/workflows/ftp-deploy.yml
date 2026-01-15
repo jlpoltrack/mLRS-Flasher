@@ -36,6 +36,6 @@ jobs:
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             open -u ${{ secrets.FTP_USERNAME }},${{ secrets.FTP_PASSWORD }} ${{ secrets.FTP_SERVER }};
-            mirror -R --verbose --delete ./web/dist/ ./mLRS-Flasher/;
+            mirror -R --verbose --delete --parallel=5 --only-newer ./web/dist/ ./flash/;
             bye
           "

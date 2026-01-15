@@ -59,5 +59,6 @@ python/
 # Virtual Env
 .venv/
 
-# FTP check script (contains credentials)
+# FTP scripts (contain credentials)
 scripts/check-ftp.sh
+scripts/cleanup-ftp.sh
