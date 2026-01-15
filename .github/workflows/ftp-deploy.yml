@@ -28,13 +28,14 @@ jobs:
         run: npm run build
         working-directory: web
 
-      - name: Deploy to FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftps
-          security: loose
-          local-dir: ./web/dist/
-          server-dir: ./mLRS-Flasher/
+      - name: Deploy via LFTP
+        run: |
+          sudo apt-get update && sudo apt-get install -y lftp
+          lftp -e "
+            set ssl:verify-certificate no;
+            set ftp:ssl-force true;
+            set ftp:ssl-protect-data true;
+            open -u ${{ secrets.FTP_USERNAME }},${{ secrets.FTP_PASSWORD }} ${{ secrets.FTP_SERVER }};
+            mirror -R --verbose --delete ./web/dist/ ./mLRS-Flasher/;
+            bye
+          "
