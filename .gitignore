@@ -58,3 +58,6 @@ python/
 
 # Virtual Env
 .venv/
+
+# FTP check script (contains credentials)
+scripts/check-ftp.sh

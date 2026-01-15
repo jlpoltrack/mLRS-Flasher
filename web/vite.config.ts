@@ -8,7 +8,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  base: '/mLRS-Flasher/',
+  base: '/mlrs/mLRS-Flasher/',
 
   plugins: [
     react(),
