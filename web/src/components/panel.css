@@ -1,4 +1,4 @@
-/* panel component styles - 2026-01-09 */
+/* panel component styles - 2026-01-15 */
 .panel {
   max-width: 1200px;
   margin: 0 auto;
@@ -34,15 +34,25 @@
   box-shadow: 0 0 10px var(--accent-primary);
 }
 
-/* 2-column grid for form fields */
+/* 6-column grid for flexible layouts (LCM of 2 and 3) */
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 20px; /* Reduced from 32px */
   margin-bottom: 20px; /* Reduced from 32px */
 }
 
-/* full-width items span both columns */
+/* span-2: 3 items per row (each spans 2 of 6 columns) */
+.form-grid .span-2 {
+  grid-column: span 2;
+}
+
+/* span-3: 2 items per row (each spans 3 of 6 columns) */
+.form-grid .span-3 {
+  grid-column: span 3;
+}
+
+/* full-width items span all columns */
 .form-grid .full-width {
   grid-column: 1 / -1;
 }
@@ -76,7 +86,7 @@
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 5px solid var(--text-tertiary);
+  border-top: 5px solid var(--text-secondary); /* Increased from tertary */
   pointer-events: none;
   z-index: 10;
   transition: transform 0.2s ease;
@@ -91,45 +101,48 @@
   width: 100%;
   height: 40px; /* Reduced from 48px */
   padding: 0 40px 0 12px;
-  /* Glass Inputs */
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--glass-border);
+  /* Glass Inputs - High Contrast with Logo Cyan Accent */
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(0, 217, 255, 0.4);
   border-radius: 8px; /* Slightly smaller radius */
   color: var(--text-primary);
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-size: 13px; /* Slightly smaller font */
+  font-size: 14px; /* Increased from 13px */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 8px rgba(0, 217, 255, 0.1);
 }
 
 .form-group select:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(15, 23, 42, 0.8);
+  border-color: rgba(0, 217, 255, 0.6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 12px rgba(0, 217, 255, 0.15);
 }
 
 .form-group select:focus {
-  border-color: var(--accent-primary);
+  border-color: var(--logo-cyan);
   outline: none;
-  background-color: rgba(15, 23, 42, 0.8);
-  box-shadow: 0 0 0 3px var(--accent-subtle); /* Smaller shadow ring */
+  background-color: var(--bg-primary);
+  box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.15), 0 8px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 217, 255, 0.2);
 }
 
 .static-display {
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--glass-border);
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(0, 217, 255, 0.3);
   border-radius: 8px;
   color: var(--text-primary);
   display: flex;
   align-items: center;
-  font-size: 13px;
+  font-size: 14px; /* Increased from 13px */
   cursor: default;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 0 4px rgba(0, 217, 255, 0.05);
 }
 
 .form-group select option {
@@ -142,10 +155,17 @@
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 .port-group select {
   flex: 1;
+  min-width: 0; /* Let it shrink if needed */
+}
+
+.port-row button {
+  min-width: 140px; /* Wider, consistent size */
+  justify-content: center;
 }
 
 .port-row .select-wrapper,
@@ -159,14 +179,7 @@
   flex-shrink: 0;
 }
 
-.button-row {
-  margin-top: 24px; /* Reduced from 40px */
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding-top: 16px; /* Reduced from 24px */
-  border-top: 1px solid var(--glass-border);
-}
+
 
 .warning-box {
   background-color: rgba(245, 158, 11, 0.1);
@@ -234,13 +247,15 @@
   gap: 16px;
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 13px;
+  font-size: 14px; /* Increased from 13px */
   line-height: 1.5;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.03);
+  /* High Contrast Notes Box with Logo Cyan Accent */
+  background: rgba(15, 23, 42, 0.5);
   border-radius: 8px;
   padding: 12px 16px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), 0 0 10px rgba(0, 217, 255, 0.08);
 }
 
 .wireless-bridge-section {

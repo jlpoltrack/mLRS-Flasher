@@ -18,6 +18,7 @@
   --accent-primary: #3b82f6; /* Blue 500 */
   --accent-hover: #2563eb;   /* Blue 600 */
   --accent-subtle: rgba(59, 130, 246, 0.15);
+  --logo-cyan: #00d9ff;
   
   /* Status Colors */
   --success: #10b981;

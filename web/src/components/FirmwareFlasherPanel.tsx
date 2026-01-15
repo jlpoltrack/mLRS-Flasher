@@ -234,7 +234,7 @@ function FirmwareFlasherPanel({
       )}
       
       <div className="form-grid">
-        <div className="form-group">
+        <div className="form-group span-2">
           <label>Device Type</label>
           <div className="select-wrapper">
             <select 
@@ -249,7 +249,7 @@ function FirmwareFlasherPanel({
           </div>
         </div>
 
-        <div className="form-group">
+        <div className="form-group span-2">
           <label>Firmware Version</label>
           <div className="select-wrapper">
             <select 
@@ -264,7 +264,7 @@ function FirmwareFlasherPanel({
           </div>
         </div>
 
-        <div className="form-group full-width">
+        <div className="form-group span-2">
           <label>Firmware File</label>
           <div className="select-wrapper">
             <select 
@@ -303,6 +303,14 @@ function FirmwareFlasherPanel({
                                     <div className="flash-card-desc">Download the .elrs file for radio-based flashing</div>
                                 </div>
                                 </div>
+                                <a 
+                                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
+                                    download={selectedFile}
+                                    className="btn-download"
+                                    style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center', textDecoration: 'none' }}
+                                >
+                                    Download
+                                </a>
                             </div>
                             
                             <div className="flash-steps" style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
@@ -328,7 +336,7 @@ function FirmwareFlasherPanel({
                             <>
                                 {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
                                     <>
-                                    <div className="form-group">
+                                    <div className="form-group span-3">
                                         <label>Flash Method</label>
                                         <div className="select-wrapper">
                                         <select 
@@ -349,7 +357,7 @@ function FirmwareFlasherPanel({
                                         </div>
                                     </div>
                                     
-                                    <div className="form-group">
+                                    <div className="form-group span-3">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
                                         <select 
@@ -415,7 +423,7 @@ function FirmwareFlasherPanel({
                                         </select>
                                     </div>
                                     <button 
-                                    className="btn-success" 
+                                    className="btn-secondary" 
                                     onClick={() => refreshPorts({ request: true })}
                                     disabled={isFlashing || isScanningPorts}
                                     title={isScanningPorts ? 'Scanning for ports...' : 'Authorize a new serial device'}
@@ -423,6 +431,41 @@ function FirmwareFlasherPanel({
                                     >
                                     {isScanningPorts ? 'Scanning...' : 'Add Device'}
                                     </button>
+
+                                    <div title={isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : !selectedPort ? 'Select a COM port first' : undefined}>
+                                      <button 
+                                        className="btn-primary btn-flash"
+                                        onClick={handleFlash}
+                                        disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedPort}
+                                        aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                      >
+                                        {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                          (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
+                                          (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                      </button>
+                                    </div>
+
+                                    {allowWirelessBridge && metadata?.hasWirelessBridge && (
+                                      <div title={isFlashing ? 'Flashing in progress' : !selectedFile ? 'Select a firmware file first' : !selectedPort ? 'Select a COM port first' : undefined}>
+                                        <button 
+                                          className="btn-primary btn-flash"
+                                          onClick={handleFlashWirelessBridge}
+                                          disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || !selectedPort}
+                                          aria-label="Flash Wireless Bridge firmware"
+                                        >
+                                          {isFlashing && flashTarget === 'wireless_bridge' ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    {isFlashing && (
+                                      <button 
+                                        className="btn-secondary btn-cancel"
+                                        onClick={() => api.cancelPython()}
+                                      >
+                                        Cancel
+                                      </button>
+                                    )}
                                 </div>
                             </div>
                             )}
@@ -464,13 +507,35 @@ function FirmwareFlasherPanel({
                                         </select>
                                     </div>
                                     <button 
-                                        className="btn-success" 
+                                        className="btn-secondary" 
                                         onClick={() => refreshUSBDevices({ request: true })}
                                         disabled={isFlashing || isScanningUSB}
                                     >
                                         {isScanningUSB ? 'Scanning...' : 'Add Device'}
                                     </button>
                                     </>
+                                )}
+                                
+                                <div title={isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : !selectedUSBDevice ? 'Select a USB device first' : undefined}>
+                                  <button 
+                                    className="btn-primary btn-flash"
+                                    onClick={handleFlash}
+                                    disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedUSBDevice}
+                                    aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                  >
+                                    {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                      (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
+                                      (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                  </button>
+                                </div>
+
+                                {isFlashing && (
+                                  <button 
+                                    className="btn-secondary btn-cancel"
+                                    onClick={() => api.cancelPython()}
+                                  >
+                                    Cancel
+                                  </button>
                                 )}
                                 </div>
                             </div>
@@ -513,13 +578,35 @@ function FirmwareFlasherPanel({
                                             </select>
                                         </div>
                                         <button 
-                                            className="btn-success" 
+                                            className="btn-secondary" 
                                             onClick={() => refreshStlinks({ request: true })}
                                             disabled={isFlashing || isScanningStlink}
                                         >
                                             {isScanningStlink ? 'Scanning...' : 'Add Device'}
                                         </button>
                                         </>
+                                    )}
+
+                                    <div title={isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : !selectedStlink ? 'Select an ST-Link device first' : undefined}>
+                                      <button 
+                                        className="btn-primary btn-flash"
+                                        onClick={handleFlash}
+                                        disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedStlink}
+                                        aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                      >
+                                        {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                          (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
+                                          (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                      </button>
+                                    </div>
+
+                                    {isFlashing && (
+                                      <button 
+                                        className="btn-secondary btn-cancel"
+                                        onClick={() => api.cancelPython()}
+                                      >
+                                        Cancel
+                                      </button>
                                     )}
                                     </div>
                                 </div>
@@ -551,52 +638,6 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {/* FOOTER ACTIONS - conditional on file type */}
-      <div className="button-row">
-        {isFrSkyR9 && isFileElrs ? (
-          <a 
-            href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
-            download={selectedFile}
-            className="btn-download btn-primary full-width-mobile"
-            style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center', textDecoration: 'none' }}
-          >
-            Download Firmware
-          </a>
-        ) : (
-          <button 
-            className="btn-primary btn-flash"
-            onClick={handleFlash}
-            disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || (flashMethod === FlashMethod.STLink && !selectedStlink) || (flashMethod === FlashMethod.DFU && !selectedUSBDevice)}
-            title={isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : (flashMethod === FlashMethod.STLink && !selectedStlink) ? 'Select an ST-Link device first' : (flashMethod === FlashMethod.DFU && !selectedUSBDevice) ? 'Select a USB device first' : undefined}
-            aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
-          >
-            {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
-              (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
-              (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
-          </button>
-        )}
-
-        {allowWirelessBridge && metadata?.hasWirelessBridge && (
-           <button 
-             className="btn-primary btn-flash"
-             onClick={handleFlashWirelessBridge}
-             disabled={isFlashing || !selectedFile || firmwareFiles.length === 0}
-             title={isFlashing ? 'Flashing in progress' : !selectedFile ? 'Select a firmware file first' : undefined}
-             aria-label="Flash Wireless Bridge firmware"
-           >
-             {isFlashing && flashTarget === 'wireless_bridge' ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
-           </button>
-        )}
-
-        {isFlashing && (
-          <button 
-            className="btn-secondary btn-cancel"
-            onClick={() => api.cancelPython()}
-          >
-            Cancel
-          </button>
-        )}
-      </div>
     </div>
   );
 }
