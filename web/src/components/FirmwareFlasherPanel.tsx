@@ -4,7 +4,7 @@ import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection }
 import { useStlinkDevices } from '../hooks/useStlinkDevices';
 import { api } from '../api/webSerialApi';
 import type { Version } from '../types';
-import { FlashMethod, TargetType } from '../constants';
+import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
 // last updated: 2026-01-15
@@ -13,12 +13,12 @@ const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SE
 
 interface FirmwareFlasherPanelProps {
   title: string;
-  targetType: string;
+  targetType: TargetType;
   versions: Version[];
   devices: string[];
   onFlash: (options: any) => void;
   isFlashing: boolean;
-  flashTarget: string | null;
+  flashTarget: BackendTarget | null;
   progress: number;
   showSerialX?: boolean;
   allowWirelessBridge?: boolean;
@@ -90,13 +90,13 @@ function FirmwareFlasherPanel({
       const methods = metadata.raw_flashmethod.split(',');
       // Only set default if current method is invalid or 'default'
       const currentMethodValid = methods.includes(flashMethod);
-      if (!flashMethod || flashMethod === 'default' || !currentMethodValid) {
+      if (!flashMethod || flashMethod === DEFAULT_FLASH_METHOD || !currentMethodValid) {
           if (methods.length > 0) {
               setFlashMethod(methods[0]);
           }
       }
     } else if (!flashMethod) {
-      setFlashMethod('default');
+      setFlashMethod(DEFAULT_FLASH_METHOD);
     }
   }, [metadata, flashMethod, setFlashMethod]);
 
@@ -168,7 +168,7 @@ function FirmwareFlasherPanel({
       port: (flashMethod === FlashMethod.STLink) ? selectedStlink : (selectedPort || undefined),
       usbDeviceName: (flashMethod === FlashMethod.DFU) ? selectedUSBDevice : (flashMethod === FlashMethod.STLink ? (selectedStlink?.productName || 'ST-Link') : undefined),
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
-      target: targetType === 'rx' ? 'receiver' : 'tx_module',
+      target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
     });
   }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata]);
 
@@ -199,7 +199,7 @@ function FirmwareFlasherPanel({
           url: file.url,
           filename: file.filename,
           port: selectedPort || undefined,
-          target: 'wireless_bridge',
+          target: BackendTarget.WirelessBridge,
           reset: metadata.wireless.reset,
           baudrate: metadata.wireless.baud,
           erase: metadata.wireless.erase
@@ -235,7 +235,7 @@ function FirmwareFlasherPanel({
       }
     } else if (isR9Tx) {
        // Force STLink for R9 Tx if method is not set or default
-        if (!flashMethod || flashMethod === 'default') {
+        if (!flashMethod || flashMethod === DEFAULT_FLASH_METHOD) {
             setFlashMethod(FlashMethod.STLink);
         }
     }
@@ -325,7 +325,7 @@ function FirmwareFlasherPanel({
                                             onChange={(e) => setFlashMethod(e.target.value)}
                                             disabled={isFlashing}
                                         >
-                                            {metadata.raw_flashmethod.split(',').map((m: string) => {
+                                            {(metadata?.raw_flashmethod?.split(',') || []).map((m: string) => {
                                             let label = m;
                                             if (m === FlashMethod.DFU) label = 'DFU (USB)';
                                             if (m === FlashMethod.STLink) label = 'STLink (SWD)';
@@ -362,7 +362,7 @@ function FirmwareFlasherPanel({
                                                                 onChange={(e) => setFlashMethod(e.target.value)}
                                                                 disabled={isFlashing}
                                                             >
-                                                                {metadata.raw_flashmethod.split(',')
+                                                                {(metadata?.raw_flashmethod?.split(',') || [])
                                                                 // Filter logic (preserve R9 strictness if desired, but conceptually just listing what's available is usually better)
                                                                 .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.APPassthru)
                                                                 .map((m: string) => {
@@ -418,11 +418,11 @@ function FirmwareFlasherPanel({
                                         className="btn-primary btn-flash"
                                         onClick={handleFlash}
                                         disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedPort}
-                                        aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                        aria-label={targetType === TargetType.Receiver ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
                                       >
-                                        {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                        {isFlashing && (flashTarget === (targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule)) ? 
                                           (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
-                                          (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                          (targetType === TargetType.Receiver ? 'Flash Receiver' : 'Flash Tx Module')}
                                       </button>
                                     </div>
 
@@ -434,7 +434,7 @@ function FirmwareFlasherPanel({
                                           disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || !selectedPort}
                                           aria-label="Flash Wireless Bridge firmware"
                                         >
-                                          {isFlashing && flashTarget === 'wireless_bridge' ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
+                                          {isFlashing && flashTarget === BackendTarget.WirelessBridge ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
                                         </button>
                                       </div>
                                     )}
@@ -502,11 +502,11 @@ function FirmwareFlasherPanel({
                                     className="btn-primary btn-flash"
                                     onClick={handleFlash}
                                     disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedUSBDevice}
-                                    aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                    aria-label={targetType === TargetType.Receiver ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
                                   >
-                                    {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                    {isFlashing && (flashTarget === (targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule)) ? 
                                       (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
-                                      (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                      (targetType === TargetType.Receiver ? 'Flash Receiver' : 'Flash Tx Module')}
                                   </button>
                                 </div>
 
@@ -573,11 +573,11 @@ function FirmwareFlasherPanel({
                                         className="btn-primary btn-flash"
                                         onClick={handleFlash}
                                         disabled={isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedStlink}
-                                        aria-label={targetType === 'rx' ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
+                                        aria-label={targetType === TargetType.Receiver ? 'Flash Receiver firmware' : 'Flash Tx Module firmware'}
                                       >
-                                        {isFlashing && (flashTarget === (targetType === 'rx' ? 'receiver' : 'tx_module')) ? 
+                                        {isFlashing && (flashTarget === (targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule)) ? 
                                           (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 
-                                          (targetType === 'rx' ? 'Flash Receiver' : 'Flash Tx Module')}
+                                          (targetType === TargetType.Receiver ? 'Flash Receiver' : 'Flash Tx Module')}
                                       </button>
                                     </div>
 

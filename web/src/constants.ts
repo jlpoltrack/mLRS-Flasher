@@ -13,6 +13,19 @@ export const TargetType = {
 export type TargetType = typeof TargetType[keyof typeof TargetType];
 
 /**
+ * backend target names expected by the python script
+ */
+export const BackendTarget = {
+  Receiver: 'receiver',
+  TxModule: 'tx_module',
+  WirelessBridge: 'wireless_bridge',
+} as const;
+
+export type BackendTarget = typeof BackendTarget[keyof typeof BackendTarget];
+
+export const DEFAULT_FLASH_METHOD = 'default';
+
+/**
  * available flash methods for programming devices
  */
 export const FlashMethod = {

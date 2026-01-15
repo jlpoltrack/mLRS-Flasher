@@ -2,7 +2,7 @@
 // last updated: 2026-01-13
 
 import FirmwareFlasherPanel from './FirmwareFlasherPanel';
-import { DEVICE_CONFIGS, TargetType } from '../constants';
+import { DEVICE_CONFIGS, TargetType, BackendTarget } from '../constants';
 import type { Version } from '../types';
 
 interface DeviceViewProps {
@@ -11,7 +11,7 @@ interface DeviceViewProps {
   devices: string[];
   onFlash: (options: any) => void;
   isFlashing: boolean;
-  flashTarget: string | null;
+  flashTarget: BackendTarget | null;
   progress: number;
 }
 

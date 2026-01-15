@@ -1,17 +1,19 @@
+import React from 'react';
 import { Radio, Cpu, FileCode } from 'lucide-react';
+import { TargetType } from '../constants';
 import './navigation.css';
 import logo from '../assets/logo.png';
 
 interface NavigationProps {
-  activeTab: string;
-  onTabChange: (tabId: string) => void;
+  activeTab: TargetType | 'lua';
+  onTabChange: (tabId: TargetType | 'lua') => void;
 }
 
 function Navigation({ activeTab, onTabChange }: NavigationProps) {
-  const tabs = [
-    { id: 'tx_ext', label: 'Tx Module (External)', icon: <Radio size={20} /> },
-    { id: 'receiver', label: 'Receiver', icon: <Cpu size={20} /> },
-    { id: 'tx_int', label: 'Tx Module (Internal)', icon: <Radio size={20} /> },
+  const tabs: { id: TargetType | 'lua'; label: string; icon: React.ReactNode }[] = [
+    { id: TargetType.TxExternal, label: 'Tx Module (External)', icon: <Radio size={20} /> },
+    { id: TargetType.Receiver, label: 'Receiver', icon: <Cpu size={20} /> },
+    { id: TargetType.TxInternal, label: 'Tx Module (Internal)', icon: <Radio size={20} /> },
     { id: 'lua', label: 'Lua Script', icon: <FileCode size={20} /> },
   ];
 

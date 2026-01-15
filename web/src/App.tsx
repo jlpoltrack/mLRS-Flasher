@@ -3,7 +3,7 @@ import Navigation from './components/Navigation';
 import Console from './components/Console';
 import UpdateBanner from './components/UpdateBanner';
 import BrowserWarning from './components/BrowserWarning';
-import { TargetType, LogType } from './constants';
+import { TargetType, LogType, BackendTarget } from './constants';
 import './styles/app.css';
 import { api } from './api/webSerialApi';
 import type { LogEntry, Version } from './types';
@@ -15,13 +15,13 @@ const LuaScript = lazy(() => import('./components/LuaScript'));
 
 
 function App() {
-  const [activeTab, setActiveTab] = useState('tx_ext');
+  const [activeTab, setActiveTab] = useState<TargetType | 'lua'>(TargetType.TxExternal);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [devices, setDevices] = useState<{ tx: string[], rx: string[], txint: string[] }>({ tx: [], rx: [], txint: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [isFlashing, setIsFlashing] = useState(false);
-  const [flashTarget, setFlashTarget] = useState<string | null>(null);
+  const [flashTarget, setFlashTarget] = useState<BackendTarget | null>(null);
   const [progress, setProgress] = useState(0);
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; releaseUrl: string; updateAvailable: boolean } | null>(null);
 
@@ -160,7 +160,7 @@ function App() {
       <Suspense fallback={<div className="loading"><div className="spinner"></div><p>Loading component...</p></div>}>
         {(() => {
           switch (activeTab) {
-            case 'tx_ext':
+            case TargetType.TxExternal:
               return (
                 <DeviceView 
                   key={TargetType.TxExternal}
@@ -173,7 +173,7 @@ function App() {
                   progress={progress}
                 />
               );
-            case 'receiver':
+            case TargetType.Receiver:
               return (
                 <DeviceView 
                   key={TargetType.Receiver}
@@ -186,7 +186,7 @@ function App() {
                   progress={progress}
                 />
               );
-            case 'tx_int':
+            case TargetType.TxInternal:
               return (
                 <DeviceView 
                   key={TargetType.TxInternal}
