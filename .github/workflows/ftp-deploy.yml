@@ -28,14 +28,12 @@ jobs:
         run: npm run build
         working-directory: web
 
-      - name: Deploy via LFTP
+      - name: Deploy via FTPS
         run: |
-          sudo apt-get update && sudo apt-get install -y lftp
-          lftp -e "
-            set ssl:verify-certificate no;
-            set ftp:ssl-force true;
-            set ftp:ssl-protect-data true;
-            open -u ${{ secrets.FTP_USERNAME }},${{ secrets.FTP_PASSWORD }} ${{ secrets.FTP_SERVER }};
-            mirror -R --verbose --delete --parallel=5 --only-newer ./web/dist/ ./flash/;
-            bye
-          "
+          cd web/dist
+          find . -type f | parallel -j 5 \
+            'curl --insecure --ftp-ssl --silent --show-error \
+                  --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+                  --upload-file {} \
+                  "ftp://${{ secrets.FTP_SERVER }}/flash/{}" \
+                  --ftp-create-dirs && echo "✓ Uploaded: {}"'
