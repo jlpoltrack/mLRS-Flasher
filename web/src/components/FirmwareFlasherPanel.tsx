@@ -6,6 +6,8 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType } from '../constants';
 import './panel.css';
 
+// last updated: 2026-01-14
+
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
 interface FirmwareFlasherPanelProps {
@@ -37,6 +39,13 @@ function FirmwareFlasherPanel({
   const [selectedVersion, setSelectedVersion] = useState('');
   const [flashMethod, setFlashMethod] = useState('');
   const [serialX, setSerialX] = useState('SERIAL1');
+
+  // reset state when switching between pages (target types)
+  useEffect(() => {
+    setSelectedDevice('');
+    setSelectedVersion('');
+    setFlashMethod('');
+  }, [targetType]);
 
   // use custom hooks for common functionality
   const {
