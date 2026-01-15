@@ -111,20 +111,22 @@
   appearance: none;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px; /* Increased from 13px */
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 8px rgba(0, 217, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); /* Removed base glow */
 }
 
 .form-group select:hover:not(:disabled) {
   background-color: rgba(15, 23, 42, 0.8);
   border-color: rgba(0, 217, 255, 0.6);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 12px rgba(0, 217, 255, 0.15);
+  /* Strongest glow on active hover */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 217, 255, 0.2);
 }
 
 .form-group select:focus {
   border-color: var(--logo-cyan);
   outline: none;
   background-color: var(--bg-primary);
-  box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.15), 0 8px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 217, 255, 0.2);
+  /* Focus remains distinct but less 'glowy' than hover */
+  box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.1), 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .static-display {
@@ -142,7 +144,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 0 4px rgba(0, 217, 255, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); /* Removed base glow */
 }
 
 .form-group select option {
