@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
-import pkg from '../package.json'
+import pkg from './package.json'
 
 // https://vite.dev/config/
 export default defineConfig({
