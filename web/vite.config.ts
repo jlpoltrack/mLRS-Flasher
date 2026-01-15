@@ -8,7 +8,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  base: '/mlrs/flash/',
+  base: process.env.VITE_BASE_PATH || '/mLRS-Flasher/',
 
   plugins: [
     react(),

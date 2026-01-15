@@ -25,7 +25,7 @@ jobs:
         working-directory: web
 
       - name: Build
-        run: npm run build
+        run: VITE_BASE_PATH=/mlrs/flash/ npm run build
         working-directory: web
 
       - name: Deploy via FTPS

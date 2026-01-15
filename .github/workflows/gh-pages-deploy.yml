@@ -33,7 +33,7 @@ jobs:
         working-directory: web
 
       - name: Build
-        run: npm run build
+        run: VITE_BASE_PATH=/mLRS-Flasher/ npm run build
         working-directory: web
 
       - name: Upload artifact
