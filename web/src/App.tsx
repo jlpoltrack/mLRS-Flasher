@@ -163,6 +163,7 @@ function App() {
             case 'tx_ext':
               return (
                 <DeviceView 
+                  key={TargetType.TxExternal}
                   targetType={TargetType.TxExternal}
                   versions={versions} 
                   devices={devices.tx} 
@@ -175,6 +176,7 @@ function App() {
             case 'receiver':
               return (
                 <DeviceView 
+                  key={TargetType.Receiver}
                   targetType={TargetType.Receiver}
                   versions={versions} 
                   devices={devices.rx} 
@@ -187,6 +189,7 @@ function App() {
             case 'tx_int':
               return (
                 <DeviceView 
+                  key={TargetType.TxInternal}
                   targetType={TargetType.TxInternal}
                   versions={versions} 
                   devices={devices.txint} 

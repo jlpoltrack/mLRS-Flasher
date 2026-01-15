@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
+import { usePersistentState } from '../hooks/usePersistentState';
 import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection } from '../hooks/useFirmwareLoader';
 import { useStlinkDevices } from '../hooks/useStlinkDevices';
 import { api } from '../api/webSerialApi';
@@ -6,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType } from '../constants';
 import './panel.css';
 
-// last updated: 2026-01-14
+// last updated: 2026-01-15
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -35,17 +36,14 @@ function FirmwareFlasherPanel({
   showSerialX = false,
   allowWirelessBridge = false,
 }: FirmwareFlasherPanelProps) {
-  const [selectedDevice, setSelectedDevice] = useState('');
-  const [selectedVersion, setSelectedVersion] = useState('');
-  const [flashMethod, setFlashMethod] = useState('');
-  const [serialX, setSerialX] = useState('SERIAL1');
+  const [selectedDevice, setSelectedDevice] = usePersistentState(`flasher_${targetType}_selectedDevice`, '');
+  const [selectedVersion, setSelectedVersion] = usePersistentState(`flasher_${targetType}_selectedVersion`, '');
+  const [flashMethod, setFlashMethod] = usePersistentState(`flasher_${targetType}_flashMethod`, '');
+  const [serialX, setSerialX] = usePersistentState(`flasher_${targetType}_serialX`, 'SERIAL1');
+  const [selectedElrsFile, setSelectedElrsFile] = usePersistentState(`flasher_${targetType}_selectedElrsFile`, '');
 
-  // reset state when switching between pages (target types)
-  useEffect(() => {
-    setSelectedDevice('');
-    setSelectedVersion('');
-    setFlashMethod('');
-  }, [targetType]);
+  // remove explicit state resets when switching between pages (target types)
+  // as we now use targetType-specific keys in localStorage
 
   // use custom hooks for common functionality
   const {
@@ -90,14 +88,31 @@ function FirmwareFlasherPanel({
   useEffect(() => {
     if (metadata?.raw_flashmethod) {
       const methods = metadata.raw_flashmethod.split(',');
-      // Default to the first method listed in metadata (preferred method)
-      if (methods.length > 0) {
-          setFlashMethod(methods[0]);
+      // Only set default if current method is invalid or 'default'
+      const currentMethodValid = methods.includes(flashMethod);
+      if (!flashMethod || flashMethod === 'default' || !currentMethodValid) {
+          if (methods.length > 0) {
+              setFlashMethod(methods[0]);
+          }
       }
-    } else {
+    } else if (!flashMethod) {
       setFlashMethod('default');
     }
-  }, [metadata]);
+  }, [metadata, flashMethod, setFlashMethod]);
+
+  // Select default ELRS file for R9 Tx
+  useEffect(() => {
+    if (selectedDevice?.includes('FrSky R9') && targetType === TargetType.TxExternal) {
+      const elrsFiles = firmwareFiles.filter(f => f.filename.toLowerCase().endsWith('.elrs'));
+      if (elrsFiles.length > 0) {
+        if (!selectedElrsFile || !elrsFiles.find(f => f.filename === selectedElrsFile)) {
+          setSelectedElrsFile(elrsFiles[0].filename);
+        }
+      } else {
+        setSelectedElrsFile('');
+      }
+    }
+  }, [selectedDevice, targetType, firmwareFiles, selectedElrsFile]);
 
   const handleFlash = useCallback(() => {
     const file = firmwareFiles.find(f => f.filename === selectedFile);
@@ -198,19 +213,17 @@ function FirmwareFlasherPanel({
   const isDevVersion = selectedVersion?.includes('dev');
   const isFrSkyR9 = selectedDevice?.includes('FrSky R9');
   const isR9Rx = isFrSkyR9 && targetType === TargetType.Receiver;
-  const isFileElrs = selectedFile?.toLowerCase().endsWith('.elrs');
+  const isR9Tx = selectedDevice?.includes('FrSky R9') && targetType === TargetType.TxExternal;
 
-  // Enforce allowed methods for R9 Rx, but allow .elrs file interactions
+  // Enforce allowed methods for R9 Rx/Tx
+  // Enforce allowed methods for R9 Rx/Tx
   useEffect(() => {
     if (isR9Rx) {
       if (flashMethod !== FlashMethod.STLink && flashMethod !== FlashMethod.APPassthru) {
         setFlashMethod(FlashMethod.STLink);
       }
-      // Only enforce hex selection if we are actually in STLink mode AND not already looking at an .elrs file (or if we want to default to hex initially)
-      // Actually, if the user explicitly picked .elrs, we shouldn't switch back.
-      // But if they switch methods, maybe?
-      // Let's just ensure if we ARE in STLink mode, and current file is NOT hex AND NOT elrs, pick a hex.
-      // But if it is ELRS, it's fine, the UI will hide the STLink controls anyway.
+      
+      // Enforce HEX selection for R9 Rx if using STLink
       if (flashMethod === FlashMethod.STLink && firmwareFiles.length > 0) {
           const currentIsElrs = selectedFile?.toLowerCase().endsWith('.elrs');
           const currentIsHex = selectedFile?.toLowerCase().endsWith('.hex');
@@ -220,8 +233,13 @@ function FirmwareFlasherPanel({
               if (hex) setSelectedFile(hex.filename);
           }
       }
+    } else if (isR9Tx) {
+       // Force STLink for R9 Tx if method is not set or default
+        if (!flashMethod || flashMethod === 'default') {
+            setFlashMethod(FlashMethod.STLink);
+        }
     }
-  }, [isR9Rx, flashMethod, firmwareFiles, selectedFile, setSelectedFile]);
+  }, [isR9Rx, isR9Tx, flashMethod, firmwareFiles, selectedFile, setSelectedFile]);
 
   return (
     <div className="panel">
@@ -278,7 +296,6 @@ function FirmwareFlasherPanel({
                 <option>No files available</option>
               ) : (
                 firmwareFiles
-                  // Allow all files for R9 (hex and elrs) - remove previous filter
                   .map(file => (
                   <option key={file.filename} value={file.filename}>{file.filename}</option>
                 ))
@@ -291,48 +308,12 @@ function FirmwareFlasherPanel({
         {(() => {
             return (
                 <>
-                    {/* ELRS Bootloader card - Show ONLY if .elrs selected */}
-                    {isFrSkyR9 && isFileElrs && (
-                    <div className="form-group full-width" style={{ marginBottom: '16px' }}>
-                        <div className="external-flash-card" style={{ marginTop: 0 }}>
-                            <div className="flash-card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
-                                <div>
-                                    <div className="flash-card-title">ELRS Bootloader Firmware</div>
-                                    <div className="flash-card-desc">Download the .elrs file for radio-based flashing</div>
-                                </div>
-                                </div>
-                                <a 
-                                    href={firmwareFiles.find(f => f.filename === selectedFile)?.url} 
-                                    download={selectedFile}
-                                    className="btn-download"
-                                    style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center', textDecoration: 'none' }}
-                                >
-                                    Download
-                                </a>
-                            </div>
-                            
-                            <div className="flash-steps" style={{ background: 'rgba(59, 130, 246, 0.05)' }}>
-                                <div className="flash-step">
-                                    <span>Download the .elrs firmware file</span>
-                                </div>
-                                <div className="flash-step">
-                                    <span>Copy the file to the SD Card of your radio and place it in the firmware folder</span>
-                                </div>
-                                <div className="flash-step">
-                                    <span>Flash the module by navigating to the firmware folder, selecting the .elrs file and clicking 'Flash external module'</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    )}
-
-                    {/* Standard Flash Method & Port Selection - Show if NOT .elrs */}
-                    {!isFileElrs && (
+                    {/* Standard Flash Method & Port Selection - Always show for R9 Tx since the two firmware paths are independent */}
+                    {/* Standard Flash Method & Port Selection */}
                         <>
                             {/* Flash Method Selection */}
-                            {metadata?.raw_flashmethod?.includes(',') && (
+                            {/* Always show for R9 Tx to confirm method, otherwise only if multiple choices exist */}
+                            {(metadata?.raw_flashmethod?.includes(',') || isR9Tx) && (
                             <>
                                 {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
                                     <>
@@ -612,6 +593,67 @@ function FirmwareFlasherPanel({
                                 </div>
                             )}
                         </>
+                    {/* ELRS Bootloader card - Show for R9 Tx */}
+                    {isR9Tx && (
+                    <div className="form-group full-width" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                        <div className="external-flash-card" style={{ marginTop: 0 }}>
+                            <div className="flash-card-header" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
+                                    <div>
+                                        <div className="flash-card-title">ELRS Bootloader Firmware</div>
+                                        <div className="flash-card-desc">Download .elrs file</div>
+                                    </div>
+                                </div>
+                                
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <div className="select-wrapper" style={{ width: '300px' }}>
+                                        <select 
+                                            value={selectedElrsFile} 
+                                            onChange={(e) => setSelectedElrsFile(e.target.value)}
+                                            disabled={isLoadingFiles}
+                                        >
+                                            {firmwareFiles.filter(f => f.filename.toLowerCase().endsWith('.elrs')).length === 0 ? (
+                                                <option>No .elrs files</option>
+                                            ) : (
+                                                firmwareFiles
+                                                    .filter(f => f.filename.toLowerCase().endsWith('.elrs'))
+                                                    .map(f => (
+                                                        <option key={f.filename} value={f.filename}>{f.filename}</option>
+                                                    ))
+                                            )}
+                                        </select>
+                                    </div>
+                                    <a 
+                                        href={firmwareFiles.find(f => f.filename === selectedElrsFile)?.url} 
+                                        download={selectedElrsFile}
+                                        className={`btn-download ${!selectedElrsFile ? 'disabled' : ''}`}
+                                        style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center', textDecoration: 'none', height: '38px', whiteSpace: 'nowrap' }}
+                                        onClick={(e) => !selectedElrsFile && e.preventDefault()}
+                                    >
+                                        Download
+                                    </a>
+                                </div>
+                            </div>
+                            
+                            <div className="flash-steps" style={{ 
+                                background: 'rgba(15, 23, 42, 0.5)', 
+                                border: '1px solid rgba(0, 217, 255, 0.3)', 
+                                gap: '16px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2), 0 0 10px rgba(0, 217, 255, 0.08)' 
+                            }}>
+                                <div className="flash-step">
+                                    <span>Download the .elrs firmware file</span>
+                                </div>
+                                <div className="flash-step">
+                                    <span>Copy the file to the SD Card of your radio and place it in the firmware folder</span>
+                                </div>
+                                <div className="flash-step">
+                                    <span>Flash the module by navigating to the firmware folder, selecting the .elrs file and clicking 'Flash external module'</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     )}
                 </>
             );

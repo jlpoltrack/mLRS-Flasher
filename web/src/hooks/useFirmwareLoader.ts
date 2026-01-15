@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePersistentState } from './usePersistentState';
 import { api } from '../api/webSerialApi';
 import {
   listPorts,
@@ -15,7 +16,7 @@ import type { FirmwareFile } from '../types';
  */
 export function useFirmwareLoader(type: string, selectedDevice: string, selectedVersion: string) {
   const [firmwareFiles, setFirmwareFiles] = useState<FirmwareFile[]>([]);
-  const [selectedFile, setSelectedFile] = useState('');
+  const [selectedFile, setSelectedFile] = usePersistentState(`flasher_${type}_selectedFile`, '');
   const [metadata, setMetadata] = useState<any>(null);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,11 @@ export function useFirmwareLoader(type: string, selectedDevice: string, selected
       setFirmwareFiles(files);
       
       if (files.length > 0) {
-        setSelectedFile(files[0].filename);
+        // Only set default if current selected file is not in the list or is empty
+        const currentFileExists = files.find((f: FirmwareFile) => f.filename === selectedFile);
+        if (!selectedFile || !currentFileExists) {
+            setSelectedFile(files[0].filename);
+        }
       } else {
         setSelectedFile('');
       }
@@ -118,7 +123,7 @@ export function useFirmwareLoader(type: string, selectedDevice: string, selected
  */
 export function useSerialPorts(isPaused = false) {
   const [ports, setPorts] = useState<string[]>([]);
-  const [selectedPort, setSelectedPort] = useState('');
+  const [selectedPort, setSelectedPort] = usePersistentState('flasher_selectedPort', '');
   const [isScanningPorts, setIsScanningPorts] = useState(false);
 
   // track mounted state to prevent state updates after unmount
@@ -234,7 +239,7 @@ export function useSerialPorts(isPaused = false) {
  */
 export function useUSBDevices(_isPaused = false) {
   const [_usbDevices, setUsbDevices] = useState<string[]>([]);
-  const [selectedUSBDevice, setSelectedUSBDevice] = useState('');
+  const [selectedUSBDevice, setSelectedUSBDevice] = usePersistentState('flasher_selectedUSBDevice', '');
   const [isScanningUSB, setIsScanningUSB] = useState(false);
 
   // track mounted state
