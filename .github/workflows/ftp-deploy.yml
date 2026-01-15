@@ -31,7 +31,7 @@ jobs:
       - name: Deploy via FTPS
         run: |
           cd web/dist
-          find . -type f | parallel -j 5 \
+          find . -type f | parallel -j 10 \
             'curl --insecure --ftp-ssl --silent --show-error \
                   --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
                   --upload-file {} \
