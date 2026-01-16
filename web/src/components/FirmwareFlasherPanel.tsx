@@ -1,8 +1,10 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection } from '../hooks/useFirmwareLoader';
 import { useStlinkDevices } from '../hooks/useStlinkDevices';
 import { api } from '../api/webSerialApi';
+import { findPortByName } from '../api/hardwareService';
+import { InavPassthroughService, type MspPort } from '../api/inavPassthrough';
 import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
@@ -41,6 +43,10 @@ function FirmwareFlasherPanel({
   const [flashMethod, setFlashMethod] = usePersistentState(`flasher_${targetType}_flashMethod`, '');
   const [serialX, setSerialX] = usePersistentState(`flasher_${targetType}_serialX`, 'SERIAL1');
   const [selectedElrsFile, setSelectedElrsFile] = usePersistentState(`flasher_${targetType}_selectedElrsFile`, '');
+
+  const [mspPorts, setMspPorts] = useState<MspPort[]>([]);
+  const [isScanningMsp, setIsScanningMsp] = useState(false);
+  const [targetUartIndex, setTargetUartIndex] = usePersistentState(`flasher_${targetType}_inavTargetUart`, '');
 
   // remove explicit state resets when switching between pages (target types)
   // as we now use targetType-specific keys in localStorage
@@ -89,7 +95,8 @@ function FirmwareFlasherPanel({
     if (metadata?.raw_flashmethod) {
       const methods = metadata.raw_flashmethod.split(',');
       // Only set default if current method is invalid or 'default'
-      const currentMethodValid = methods.includes(flashMethod);
+      // Allow InavPassthrough even if not in metadata, as we inject it manually
+      const currentMethodValid = methods.includes(flashMethod) || (flashMethod === FlashMethod.InavPassthrough && targetType === TargetType.Receiver);
       if (!flashMethod || flashMethod === DEFAULT_FLASH_METHOD || !currentMethodValid) {
           if (methods.length > 0) {
               setFlashMethod(methods[0]);
@@ -114,6 +121,70 @@ function FirmwareFlasherPanel({
     }
   }, [selectedDevice, targetType, firmwareFiles, selectedElrsFile]);
 
+  // Auto-scan MSP ports when method or port changes
+  useEffect(() => {
+    if (flashMethod === FlashMethod.InavPassthrough && selectedPort) {
+        // debounce to avoid duplicate scans from react strict mode
+        const timer = setTimeout(() => scanMspPorts(), 100);
+        return () => clearTimeout(timer);
+    } else if (flashMethod !== FlashMethod.InavPassthrough) {
+        setMspPorts([]);
+    }
+  }, [flashMethod, selectedPort]); // scanMspPorts omitted to avoid loop, it is stable enough via useCallback if we added it, but cleaner this way or add it and ensure stability
+
+  const scanMspPorts = useCallback(async () => {
+    if (!selectedPort) return;
+    
+    // Prevent overlapping scans
+    if (isScanningMsp) return;
+
+    setIsScanningMsp(true);
+    setMspPorts([]); // Clear previous results while scanning
+    setError(null);
+    
+    try {
+        const port = await findPortByName(selectedPort);
+        if (!port) return; 
+        
+        const service = new InavPassthroughService(port, (msg) => {
+            console.log(`[MSP] ${msg}`);
+            // Provide feedback during scan for common issues
+            if (msg.includes("Timeout")) setError(`Scan Timeout on ${selectedPort}: Ensure FC is disarmed and Configurator is closed.`);
+            if (msg.includes("Header Timeout")) setError(`No response from FC on ${selectedPort}. Check wiring/baud.`);
+            if (msg.includes("Discarded")) console.warn(msg);
+        });
+        // We catch connect errors specifically to avoid noisy UI if port is busy/glitched
+        try {
+            await service.connect();
+            const ports = await service.getMspPorts();
+            setMspPorts(ports);
+        } catch (e: any) {
+             console.error("MSP Scan failed:", e);
+             // Don't set global error for background scan, just log it
+             // user can retry by re-selecting port if needed
+        } finally {
+            try {
+                await service.disconnect();
+                await service.close();
+            } catch (e) { /* ignore close errors */ }
+        }
+    } catch (e: any) {
+        console.error("Port lookup failed:", e);
+    } finally {
+        setIsScanningMsp(false);
+    }
+  }, [selectedPort]); // Removed isScanningMsp and targetUartIndex dependencies
+
+  // Auto-select MSP port when list updates
+  useEffect(() => {
+      if (mspPorts.length > 0) {
+           const currentValid = mspPorts.find(p => p.index.toString() === targetUartIndex);
+           if (!currentValid) {
+               setTargetUartIndex(mspPorts[0].index.toString());
+           }
+      }
+  }, [mspPorts, targetUartIndex, setTargetUartIndex]);
+
   const handleFlash = useCallback(() => {
     const file = firmwareFiles.find(f => f.filename === selectedFile);
     if (!file) return;
@@ -122,7 +193,7 @@ function FirmwareFlasherPanel({
     // FIX: logic now allows selecting port for appassthru if needed, but appassthru usually needs it passed
     // the previous bug was that we didn't force port selection for appassthru in Python,
     // but the UI needs to let the user select it if the method is UART-based or appassthru
-    const needsPort = (flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || metadata?.needsPort);
+    const needsPort = (flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || flashMethod === FlashMethod.InavPassthrough || metadata?.needsPort);
     
     if (needsPort && !selectedPort) {
       setError('Please select a COM port first.');
@@ -137,6 +208,11 @@ function FirmwareFlasherPanel({
     if (flashMethod === FlashMethod.STLink && !selectedStlink) {
        setError('Please select an ST-Link device first.');
        return;
+    }
+
+    if (flashMethod === FlashMethod.InavPassthrough && !targetUartIndex) {
+        setError('Please select a valid MSP Port.');
+        return;
     }
 
     // clear any previous error before starting
@@ -163,6 +239,7 @@ function FirmwareFlasherPanel({
       version: selectedVersion,
       flashMethod: flashMethod,
       passthroughSerial: (flashMethod === FlashMethod.APPassthru) ? serialX : undefined,
+      passthroughIdentifier: (flashMethod === FlashMethod.InavPassthrough) ? parseInt(targetUartIndex) : undefined,
       url: file.url,
       filename: file.filename,
       port: (flashMethod === FlashMethod.STLink) ? selectedStlink : (selectedPort || undefined),
@@ -170,7 +247,7 @@ function FirmwareFlasherPanel({
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, targetUartIndex, setError, onFlash, targetType, metadata]);
 
   const handleFlashWirelessBridge = useCallback(async () => {
     if (!metadata?.wireless?.chipset) {
@@ -313,9 +390,9 @@ function FirmwareFlasherPanel({
                         <>
                             {/* Flash Method Selection */}
                             {/* Always show for R9 Tx to confirm method, otherwise only if multiple choices exist */}
-                            {(metadata?.raw_flashmethod?.includes(',') || isR9Tx) && (
+                            {(metadata?.raw_flashmethod?.includes(',') || isR9Tx || flashMethod === FlashMethod.InavPassthrough) && (
                             <>
-                                {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
+                                {((showSerialX && flashMethod === FlashMethod.APPassthru) || flashMethod === FlashMethod.InavPassthrough) ? (
                                     <>
                                     <div className="form-group span-3">
                                         <label>Flash Method</label>
@@ -325,19 +402,24 @@ function FirmwareFlasherPanel({
                                             onChange={(e) => setFlashMethod(e.target.value)}
                                             disabled={isFlashing}
                                         >
-                                            {(metadata?.raw_flashmethod?.split(',') || []).map((m: string) => {
+                                            {[...(metadata?.raw_flashmethod?.split(',') || []), FlashMethod.InavPassthrough]
+                                                .filter((v, i, a) => a.indexOf(v) === i) // unique
+                                                .filter(m => m !== FlashMethod.InavPassthrough || targetType === TargetType.Receiver) // Only Rx
+                                                .map((m: string) => {
                                             let label = m;
                                             if (m === FlashMethod.DFU) label = 'DFU (USB)';
                                             if (m === FlashMethod.STLink) label = 'STLink (SWD)';
                                             if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
                                             if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
                                             if (m === FlashMethod.APPassthru) label = 'AP Passthru';
+                                            if (m === FlashMethod.InavPassthrough) label = 'INAV Passthrough';
                                             return <option key={m} value={m}>{label}</option>;
                                             })}
                                         </select>
                                         </div>
                                     </div>
                                     
+                                    {flashMethod === FlashMethod.APPassthru && (
                                     <div className="form-group span-3">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
@@ -352,6 +434,34 @@ function FirmwareFlasherPanel({
                                         </select>
                                         </div>
                                     </div>
+                                    )}
+
+                                    {flashMethod === FlashMethod.InavPassthrough && (
+                                    <div className="form-group span-3">
+                                        <label>MSP Port</label>
+                                        <div className="select-wrapper">
+                                            <select
+                                                value={targetUartIndex}
+                                                onChange={(e) => setTargetUartIndex(e.target.value)}
+                                                disabled={isFlashing || isScanningMsp}
+                                            >
+                                                {isScanningMsp ? (
+                                                     <option>Scanning FC ports...</option>
+                                                ) : mspPorts.length === 0 ? (
+                                                    <option value="" disabled>No MSP ports found</option>
+                                                ) : (
+                                                    mspPorts.map(p => (
+                                                        <option key={p.index} value={p.index}>{p.name}</option>
+                                                    ))
+                                                )}
+                                                {/* Fallback if user wants to set manually but hasn't scanned */}
+                                                {!isScanningMsp && mspPorts.length === 0 && targetUartIndex && (
+                                                    <option value={targetUartIndex}>UART {parseInt(targetUartIndex) + 1}</option>
+                                                )}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    )}
                                     </>
                                 ) : (
                                     <div className="form-group full-width">
@@ -362,15 +472,18 @@ function FirmwareFlasherPanel({
                                                                 onChange={(e) => setFlashMethod(e.target.value)}
                                                                 disabled={isFlashing}
                                                             >
-                                                                {(metadata?.raw_flashmethod?.split(',') || [])
+                                                                {[...(metadata?.raw_flashmethod?.split(',') || []), FlashMethod.InavPassthrough]
+                                                                .filter((v, i, a) => a.indexOf(v) === i) // unique
+                                                                .filter(m => m !== FlashMethod.InavPassthrough || targetType === TargetType.Receiver) // Only Rx
                                                                 // Filter logic (preserve R9 strictness if desired, but conceptually just listing what's available is usually better)
-                                                                .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.APPassthru)
+                                                                .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.APPassthru || m === FlashMethod.InavPassthrough)
                                                                 .map((m: string) => {
                                                                 let label = m;
                                                                 if (m === FlashMethod.DFU) label = 'DFU (USB)';                                                                if (m === FlashMethod.STLink) label = 'STLink (SWD)';
                                                                 if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
                                                                 if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
                                                                 if (m === FlashMethod.APPassthru) label = 'AP Passthru';
+                                                                if (m === FlashMethod.InavPassthrough) label = 'INAV Passthrough';
                                                                 return <option key={m} value={m}>{label}</option>;
                                                                 })}
                                                             </select>
@@ -381,9 +494,11 @@ function FirmwareFlasherPanel({
                             )}
 
                             {/* COM Port Selection */}
-                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && !isFrSkyR9 && (
+                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || flashMethod === FlashMethod.InavPassthrough) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && !isFrSkyR9 && (
                             <div className="form-group port-group full-width">
-                                <label>COM Port</label>
+                                <label>
+                                    {flashMethod === FlashMethod.InavPassthrough ? "Flight Controller Port" : "COM Port"}
+                                </label>
                                 <div className="port-row">
                                     <div className="select-wrapper">
                                         <select 

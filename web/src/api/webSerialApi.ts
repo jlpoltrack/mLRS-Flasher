@@ -116,6 +116,7 @@ export const api = {
     device: string,
     flashMethod?: string,
     passthroughSerial?: string,
+    passthroughIdentifier?: number,
     baudrate?: number,
     target?: string,
     reset?: string,
@@ -148,6 +149,7 @@ export const api = {
       device: options.device,
       flashMethod: options.flashMethod,
       passthroughSerial: options.passthroughSerial,
+      passthroughIdentifier: options.passthroughIdentifier,
       isWirelessBridge: !!metadata.isWirelessBridgeFirmware
     };
 

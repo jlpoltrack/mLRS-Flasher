@@ -22,8 +22,15 @@ export class Stm32UartProtocol {
     }
 
     async connect() {
-        // explicitly set 8E1 and signals to match stm-serial-flasher reference state
-        await (this.port as any).open({ baudRate: 115200, parity: 'even', stopBits: 1 });
+        // Check if port is already open (has a readable stream)
+        const isAlreadyOpen = !!this.port.readable;
+
+        if (isAlreadyOpen) {
+             this.onLog?.("Port already open, using existing connection (Passthrough Mode).");
+        } else {
+             // explicitly set 8E1 and signals to match stm-serial-flasher reference state
+             await (this.port as any).open({ baudRate: 115200, parity: 'even', stopBits: 1 });
+        }
         
         this.reader = this.port.readable!.getReader();
         this.writer = this.port.writable!.getWriter();

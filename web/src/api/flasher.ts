@@ -2,6 +2,7 @@ import { ESPLoader, Transport } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
 import { initApPassthrough } from './apPassthru';
+import { InavPassthroughService } from './inavPassthrough';
 import { FlasherStateMachine } from './flasherStateMachine';
 import { parseHex } from './hexParser';
 import { getPageSize, isKnownChip, FLASH_BASE, MAX_FLASH_SIZE } from './chipConstants';
@@ -28,6 +29,7 @@ export interface FlasherOptions {
   device?: string;
   flashMethod?: string;
   passthroughSerial?: string;
+  passthroughIdentifier?: number; // UART Index for INAV Passthrough
   isWirelessBridge?: boolean; // external tx wireless bridge mode
 }
 
@@ -67,6 +69,15 @@ export async function flash(
                 options.baud = result.baudRate;
                 onLog?.(`STM32 Passthrough: Using FC baud rate ${options.baud}`);
             }
+        } else if (flashMethod === 'inav_passthrough') {
+             if (options.passthroughIdentifier === undefined) {
+                 throw new Error("Target UART not specified for INAV Passthrough");
+             }
+             const svc = new InavPassthroughService(port as SerialPort, onLog);
+             await svc.connect();
+             await svc.enterPassthrough(options.passthroughIdentifier, 115200);
+             options.baud = 115200;
+             // Port remains open
         }
         return flashSTM32UART(port as SerialPort, firmwareData, options);
     }
@@ -110,6 +121,15 @@ export async function flash(
         const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
         port = result.port;
         // ESP always forced to 115200 by initApPassthrough logic
+     } else if (flashMethod === 'inav_passthrough') {
+        if (options.passthroughIdentifier === undefined) {
+            throw new Error("Target UART not specified for INAV Passthrough");
+        }
+        const svc = new InavPassthroughService(port as SerialPort, onLog);
+        await svc.connect();
+        await svc.enterPassthrough(options.passthroughIdentifier, 115200);
+        options.baud = 115200;
+        // Port remains open
      }
 
      return flashESP(port as SerialPort, firmwareData, options);
@@ -229,8 +249,8 @@ async function flashESP(
 
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
-  // Ensure port is closed (so esptool can open it)
-  if (port.readable || port.writable) {
+  // Ensure port is closed (so esptool can open it) - UNLESS in INAV passthrough
+  if ((port.readable || port.writable) && flashMethod !== 'inav_passthrough') {
       try {
           await port.close(); 
       } catch (e) {
@@ -242,7 +262,7 @@ async function flashESP(
   const transport = new Transport(port as any);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
-  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
+  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
       sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };

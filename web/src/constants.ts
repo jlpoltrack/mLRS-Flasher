@@ -34,6 +34,7 @@ export const FlashMethod = {
   ESPTool: 'esptool',
   STLink: 'stlink',
   APPassthru: 'appassthru',
+  InavPassthrough: 'inav_passthrough',
   ELRSBL: 'elrsbl',
 } as const;
 
