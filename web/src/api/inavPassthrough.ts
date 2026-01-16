@@ -57,7 +57,6 @@ export class InavPassthroughService {
                 const { value, done } = await this.reader.read();
                 if (done) break;
                 if (value) {
-                    this.log(`RECV: ${this.toHex(value)}`);
                     for (let i = 0; i < value.length; i++) {
                         this.rxBuffer.push(value[i]);
                     }
