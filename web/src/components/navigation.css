@@ -17,6 +17,18 @@
   text-align: center;
   border-bottom: 1px solid var(--glass-border);
   background: linear-gradient(to bottom, rgba(255,255,255,0.05), transparent);
+  text-decoration: none;
+  display: block;
+  transition: all 0.3s ease;
+}
+
+.nav-header:hover {
+  background: linear-gradient(to bottom, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+}
+
+.nav-header:hover .nav-logo {
+  filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.5));
+  transform: scale(1.02);
 }
 
 .nav-logo {
@@ -24,6 +36,7 @@
   height: auto;
   margin-bottom: 12px;
   filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.3));
+  transition: all 0.3s ease;
 }
 
 .nav-title {

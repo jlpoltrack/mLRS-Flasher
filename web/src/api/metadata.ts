@@ -140,6 +140,15 @@ export const g_targetDict: Record<string, any> = {
             'description' : description_stm32_stlink_default + description_ap_passthru_default,
         }
     },
+    'rx-E77-MBLKit' : {
+        'description' : description_stm32_stlink_default,
+    },
+    'rx-Wio-E5' : {
+        'description' : description_stm32_stlink_default,
+    },
+    'rx-easysolder' : {
+        'description' : description_stm32_stlink_default,
+    },
     'rx-radiomaster' : {
         'flashmethod' : 'esptool,appassthru',
         'description' : description_esp_esptool_uart_default + description_ap_passthru_default,

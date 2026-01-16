@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-01-15
+// last updated: 2026-01-16
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -252,7 +252,7 @@ function FirmwareFlasherPanel({
       )}
       
       <div className="form-grid">
-        <div className="form-group span-2">
+        <div className="form-group span-1">
           <label>Device Type</label>
           <div className="select-wrapper">
             <select 
@@ -267,7 +267,7 @@ function FirmwareFlasherPanel({
           </div>
         </div>
 
-        <div className="form-group span-2">
+        <div className="form-group span-1">
           <label>Firmware Version</label>
           <div className="select-wrapper">
             <select 
@@ -296,6 +296,7 @@ function FirmwareFlasherPanel({
                 <option>No files available</option>
               ) : (
                 firmwareFiles
+                  .filter(file => (!isR9Rx && !isR9Tx) || !file.filename.toLowerCase().endsWith('.elrs'))
                   .map(file => (
                   <option key={file.filename} value={file.filename}>{file.filename}</option>
                 ))
@@ -317,7 +318,7 @@ function FirmwareFlasherPanel({
                             <>
                                 {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
                                     <>
-                                    <div className="form-group span-3">
+                                    <div className="form-group span-2">
                                         <label>Flash Method</label>
                                         <div className="select-wrapper">
                                         <select 
@@ -338,7 +339,7 @@ function FirmwareFlasherPanel({
                                         </div>
                                     </div>
                                     
-                                    <div className="form-group span-3">
+                                    <div className="form-group span-2">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
                                         <select 
@@ -381,7 +382,7 @@ function FirmwareFlasherPanel({
                             )}
 
                             {/* COM Port Selection */}
-                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && !isFrSkyR9 && (
+                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && (!isFrSkyR9 || (isFrSkyR9 && flashMethod === FlashMethod.APPassthru)) && (
                             <div className="form-group port-group full-width">
                                 <label>COM Port</label>
                                 <div className="port-row">
@@ -597,7 +598,7 @@ function FirmwareFlasherPanel({
                     {isR9Tx && (
                     <div className="form-group full-width" style={{ marginTop: '16px', marginBottom: '16px' }}>
                         <div className="external-flash-card" style={{ marginTop: 0 }}>
-                            <div className="flash-card-header" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+                            <div className="flash-card-header" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                     <div className="flash-card-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>💾</div>
                                     <div>
@@ -639,7 +640,7 @@ function FirmwareFlasherPanel({
                             <div className="flash-steps" style={{ 
                                 background: 'rgba(15, 23, 42, 0.5)', 
                                 border: '1px solid rgba(0, 217, 255, 0.3)', 
-                                gap: '16px',
+                                gap: '8px',
                                 boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2), 0 0 10px rgba(0, 217, 255, 0.08)' 
                             }}>
                                 <div className="flash-step">
@@ -667,7 +668,7 @@ function FirmwareFlasherPanel({
         </div>
       )}
 
-      {metadata?.description && flashMethod !== FlashMethod.STLink && (
+      {metadata?.description && (
         <div className="description-box">
           <div className="flash-card-header">
              <div className="flash-card-title">Flashing Notes</div>

@@ -19,14 +19,19 @@ function Navigation({ activeTab, onTabChange }: NavigationProps) {
 
   return (
     <nav className="navigation">
-      <div className="nav-header">
+      <a 
+        href="https://github.com/olliw42/mLRS" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        className="nav-header"
+      >
         <img
           src={logo}
           alt="mLRS Logo"
           className="nav-logo"
         />
         <h1 className="nav-title">mLRS Flasher</h1>
-      </div>
+      </a>
 
       <div className="nav-tabs">
         {tabs.map(tab => (

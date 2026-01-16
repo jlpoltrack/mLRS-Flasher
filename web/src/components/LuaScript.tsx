@@ -76,7 +76,7 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
       )}
       
       <div className="form-grid">
-        <div className="form-group span-3 port-group">
+        <div className="form-group span-2 port-group">
           <label>Lua Script (from Main branch)</label>
           <div className="port-row">
             <div className="select-wrapper">
