@@ -1,4 +1,4 @@
-// 2026-01-15
+// 2026-01-16
 const MSP2_COMMON_SERIAL_CONFIG = 0x1009;  // Common MSP V2 (4105)
 
 // Serial Port Functions (Bitmask)
@@ -10,15 +10,7 @@ const FUNCTION_TELEMETRY_SMARTPORT = (1 << 5);
 const FUNCTION_VTX_SMARTAUDIO = (1 << 11);
 const FUNCTION_VTX_TRAMP = (1 << 13);
 const FUNCTION_TELEMETRY_MAVLINK = (1 << 9);
-const FUNCTION_ESC_SENSOR = (1 << 10);
-const FUNCTION_TELEMETRY_FRSKY = (1 << 2);
-const FUNCTION_TELEMETRY_HOTT = (1 << 3);
-const FUNCTION_TELEMETRY_LTM = (1 << 4);
-const FUNCTION_TELEMETRY_IBUS = (1 << 12);
-const FUNCTION_RCDEVICE = (1 << 14);
-const FUNCTION_LIDAR_TF = (1 << 15);
-const FUNCTION_FRSKY_OSD = (1 << 16);
-const FUNCTION_VTX_MSP = (1 << 17);
+
 
 export interface MspPort {
     index: number;
@@ -192,7 +184,28 @@ export class InavPassthroughService {
         // Force closure and re-open to ensure correct baud rate and clean state
         if (this.port.readable || this.port.writable) {
             this.log("Port was already open, cycling state...");
-            try { await this.port.close(); } catch {}
+            
+            // Release any existing locks before closing
+            this.reading = false;
+            if (this.reader) {
+                try { await this.reader.cancel(); } catch {}
+                try { this.reader.releaseLock(); } catch {}
+                this.reader = null;
+            }
+            if (this.writer) {
+                try { this.writer.releaseLock(); } catch {}
+                this.writer = null;
+            }
+            
+            // Small delay for stream cleanup
+            await new Promise(r => setTimeout(r, 100));
+            
+            try { 
+                await this.port.close(); 
+                this.log("Port closed for cycling.");
+            } catch (e: any) {
+                this.log(`Port close during cycle failed: ${e?.message || e}`);
+            }
             await new Promise(r => setTimeout(r, 200));
         }
         
@@ -212,19 +225,62 @@ export class InavPassthroughService {
         if (initialGarbage > 0) this.log(`Cleared ${initialGarbage} bytes from settle period.`);
     }
 
+    /**
+     * Release stream locks without closing the port.
+     * Use this for temporary disconnection when you need to reuse the same port later.
+     */
     async disconnect() {
+        this.log("Disconnecting (releasing locks)...");
+        
+        // Signal read loop to stop
         this.reading = false;
+        
+        // Cancel reader to unblock read()
+        if (this.reader) {
+            this.log("Cancelling reader...");
+            try { 
+                await this.reader.cancel(); 
+            } catch (e: any) {
+                this.log(`Reader cancel: ${e?.message || e}`);
+            }
+            // Wait for startReading's finally block
+            let limit = 20;
+            while (this.reader && limit-- > 0) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+            if (this.reader) {
+                try { this.reader.releaseLock(); } catch {}
+                this.reader = null;
+            }
+        }
+        
+        // Release writer lock
         if (this.writer) {
+            this.log("Releasing writer lock...");
             try { this.writer.releaseLock(); } catch {}
             this.writer = null;
         }
+        
+        this.log("Disconnect complete.");
     }
 
+    /**
+     * Fully close the serial port. Call this when completely done with the port.
+     */
     async close() {
+        this.log("Closing serial connection...");
+        
+        // First release all locks
         await this.disconnect();
-        let limit = 20;
-        while (this.reader && limit-- > 0) await new Promise(r => setTimeout(r, 50));
-        try { await this.port.close(); } catch {}
+        
+        // Now close the port
+        try { 
+            await this.port.close(); 
+            this.log("Port closed successfully.");
+        } catch (e: any) {
+            this.log(`Port close error: ${e?.message || e}`);
+            throw e; // Re-throw so caller knows it failed
+        }
     }
 
     async getMspPorts(): Promise<MspPort[]> {
@@ -249,7 +305,7 @@ export class InavPassthroughService {
                 if (mask & FUNCTION_VTX_SMARTAUDIO) functions.push('SmartAudio');
                 if (mask & FUNCTION_VTX_TRAMP) functions.push('Tramp');
                 if (mask & FUNCTION_TELEMETRY_MAVLINK) functions.push('Mavlink');
-                if (id < 20) {
+                if (id < 20 && (mask & FUNCTION_MSP)) {
                      ports.push({
                          index: id,
                          name: `UART ${id + 1}${functions.length > 0 ? ` (${functions.join(', ')})` : ''}`,
@@ -267,14 +323,30 @@ export class InavPassthroughService {
 
     async enterPassthrough(uartId: number, baud: number) {
         this.log(`Commanding FC to redirect UART ${uartId + 1} at ${baud} baud...`);
-        await this.write(new TextEncoder().encode('#'));
+        // Ensure we are in CLI mode by sending newlines and hash
+        await this.write(new TextEncoder().encode('\n\n#\n'));
         await new Promise(r => setTimeout(r, 500));
         this.rxBuffer = []; 
         
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
         await this.write(new TextEncoder().encode(cmd));
-        await new Promise(r => setTimeout(r, 1000));
+        
+        // Wait for FC to switch and silence any confirmation messages
+        this.log("Waiting for link to settle...");
+        await new Promise(r => setTimeout(r, 2000));
+        
+        const noise = this.rxBuffer.length;
+        if (noise > 0) this.log(`Cleared ${noise} bytes of transition noise.`);
+        this.rxBuffer = [];
+
         this.log("Passthrough active. Handing over port control.");
-        await this.disconnect();
+        this.log(">>> Calling close() to release port...");
+        try {
+            await this.close();
+            this.log(">>> close() completed successfully.");
+        } catch (e: any) {
+            this.log(`>>> close() FAILED: ${e?.message || e}`);
+            throw e;
+        }
     }
 }

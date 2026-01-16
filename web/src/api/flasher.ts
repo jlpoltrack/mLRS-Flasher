@@ -1,4 +1,4 @@
-import { ESPLoader, Transport } from 'esptool-js';
+import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
 import { initApPassthrough } from './apPassthru';
@@ -77,7 +77,6 @@ export async function flash(
              await svc.connect();
              await svc.enterPassthrough(options.passthroughIdentifier, 115200);
              options.baud = 115200;
-             // Port remains open
         }
         return flashSTM32UART(port as SerialPort, firmwareData, options);
     }
@@ -129,7 +128,6 @@ export async function flash(
         await svc.connect();
         await svc.enterPassthrough(options.passthroughIdentifier, 115200);
         options.baud = 115200;
-        // Port remains open
      }
 
      return flashESP(port as SerialPort, firmwareData, options);
@@ -249,14 +247,27 @@ async function flashESP(
 
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
-  // Ensure port is closed (so esptool can open it) - UNLESS in INAV passthrough
-  if ((port.readable || port.writable) && flashMethod !== 'inav_passthrough') {
+  // Debug: Check port state
+  sm.log(`Port state check: readable=${!!port.readable}, writable=${!!port.writable}`);
+  
+  // Ensure port is closed (so esptool can open it) 
+  if (port.readable || port.writable) {
+      sm.log("Port appears open, attempting to close...");
       try {
           await port.close(); 
+          sm.log("Port closed in flashESP.");
       } catch (e) {
-          sm.log(`Warning: Port closure check: ${e instanceof Error ? e.message : String(e)}`);
+          sm.log(`Warning: Port closure in flashESP failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+      // Wait a moment for OS to release the port
+      await new Promise(r => setTimeout(r, 500));
   }
+  
+  sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
+
+  // Give the browser extra time to fully release the port
+  sm.log("Waiting for port to fully release...");
+  await new Promise(r => setTimeout(r, 1000));
 
   // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port as any);
@@ -280,7 +291,17 @@ async function flashESP(
   });
 
   try {
-    const chipName = await esploader.main();
+    let chipName: string;
+    if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+        sm.log("Passthrough detected: Using ROM loader (no stub) for maximum reliability.");
+        // connect takes (mode?, attempts?, detecting?)
+        await esploader.connect(reset as Before || 'no_reset', 5, true);
+        await esploader.detectChip();
+        chipName = esploader.chip.CHIP_NAME;
+    } else {
+        chipName = await esploader.main(reset as Before || 'default_reset');
+    }
+    
     sm.log(`Detected chip: ${chipName}`);
 
     if (erase === 'full_erase') {
