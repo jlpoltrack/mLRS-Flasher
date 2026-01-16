@@ -22,6 +22,7 @@ export class InavPassthroughService {
     private port: SerialPort;
     private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+    private readingPromise: Promise<void> | null = null;
     private onLog?: (msg: string) => void;
     private rxBuffer: number[] = [];
     private reading = false;
@@ -216,7 +217,7 @@ export class InavPassthroughService {
         await this.port.setSignals({ dataTerminalReady: true, requestToSend: true });
         
         this.writer = this.port.writable!.getWriter();
-        this.startReading();
+        this.readingPromise = this.startReading();
         
         this.log("Waiting for FC to settle...");
         await new Promise(r => setTimeout(r, 1000));
@@ -243,15 +244,24 @@ export class InavPassthroughService {
             } catch (e: any) {
                 this.log(`Reader cancel: ${e?.message || e}`);
             }
-            // Wait for startReading's finally block
-            let limit = 20;
-            while (this.reader && limit-- > 0) {
-                await new Promise(r => setTimeout(r, 50));
+        }
+        
+        // Wait for the background reader to fully exit
+        if (this.readingPromise) {
+            this.log("Waiting for reader loop to exit...");
+            try {
+                await this.readingPromise;
+            } catch (e: any) {
+                this.log(`Reader loop exit: ${e?.message || e}`);
             }
-            if (this.reader) {
-                try { this.reader.releaseLock(); } catch {}
-                this.reader = null;
-            }
+            this.readingPromise = null;
+        }
+        
+        // Final cleanup in case reader wasn't fully released
+        if (this.reader) {
+            this.log("Force-releasing reader lock...");
+            try { this.reader.releaseLock(); } catch {}
+            this.reader = null;
         }
         
         // Release writer lock
@@ -277,6 +287,8 @@ export class InavPassthroughService {
         try { 
             await this.port.close(); 
             this.log("Port closed successfully.");
+            // give the OS time to fully release the port
+            await new Promise(r => setTimeout(r, 200));
         } catch (e: any) {
             this.log(`Port close error: ${e?.message || e}`);
             throw e; // Re-throw so caller knows it failed

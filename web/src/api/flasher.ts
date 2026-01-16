@@ -291,16 +291,11 @@ async function flashESP(
   });
 
   try {
-    let chipName: string;
-    if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
-        sm.log("Passthrough detected: Using ROM loader (no stub) for maximum reliability.");
-        // connect takes (mode?, attempts?, detecting?)
-        await esploader.connect(reset as Before || 'no_reset', 5, true);
-        await esploader.detectChip();
-        chipName = esploader.chip.CHIP_NAME;
-    } else {
-        chipName = await esploader.main(reset as Before || 'default_reset');
-    }
+    // use no_reset for passthrough modes since DTR/RTS are disabled
+    const resetMode = (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') 
+        ? 'no_reset' as Before 
+        : (reset as Before || 'default_reset');
+    const chipName = await esploader.main(resetMode);
     
     sm.log(`Detected chip: ${chipName}`);
 
