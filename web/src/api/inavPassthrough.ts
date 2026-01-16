@@ -57,6 +57,7 @@ export class InavPassthroughService {
                 const { value, done } = await this.reader.read();
                 if (done) break;
                 if (value) {
+                    this.log(`RECV: ${this.toHex(value)}`);
                     for (let i = 0; i < value.length; i++) {
                         this.rxBuffer.push(value[i]);
                     }
@@ -334,24 +335,50 @@ export class InavPassthroughService {
     }
 
     async enterPassthrough(uartId: number, baud: number) {
+        this.log(">>> enterPassthrough() started.");
         this.log(`Commanding FC to redirect UART ${uartId + 1} at ${baud} baud...`);
+        
         // Ensure we are in CLI mode by sending newlines and hash
         await this.write(new TextEncoder().encode('\n\n#\n'));
-        await new Promise(r => setTimeout(r, 500));
-        this.rxBuffer = []; 
+        this.log("Waiting 1500ms for CLI to stabilize...");
+        await new Promise(r => setTimeout(r, 1500));
+        
+        // Log what we got back from the prefix
+        const entryNoiseCount = this.rxBuffer.length;
+        if (entryNoiseCount > 0) {
+            const noise = Uint8Array.from(this.rxBuffer);
+            const ascii = new TextDecoder().decode(noise).replace(/[^\x20-\x7E]/g, '.');
+            this.log(`CLI Entry Noise (${entryNoiseCount} bytes): [HEX: ${this.toHex(this.rxBuffer)}] [ASCII: ${ascii}]`);
+            this.rxBuffer = [];
+        } else {
+            this.log("CLI Entry: No noise detected in buffer.");
+        }
         
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
         await this.write(new TextEncoder().encode(cmd));
         
-        // Wait for FC to switch and silence any confirmation messages
-        this.log("Waiting for link to settle...");
-        await new Promise(r => setTimeout(r, 2000));
+        // Wait for FC to switch - increased to ensure stabilization
+        this.log("Waiting 1500ms for passthrough to activate...");
+        await new Promise(r => setTimeout(r, 1500));
         
-        const noise = this.rxBuffer.length;
-        if (noise > 0) this.log(`Cleared ${noise} bytes of transition noise.`);
-        this.rxBuffer = [];
+        const noiseCount = this.rxBuffer.length;
+        if (noiseCount > 0) {
+            const noise = Uint8Array.from(this.rxBuffer);
+            const ascii = new TextDecoder().decode(noise).replace(/[^\x20-\x7E]/g, '.');
+            this.log(`Transition Noise (${noiseCount} bytes): [HEX: ${this.toHex(this.rxBuffer)}] [ASCII: ${ascii}]`);
+            this.rxBuffer = [];
+        } else {
+            this.log("Transition: No noise detected in buffer.");
+        }
 
-        this.log("Passthrough active. Handing over port control.");
+        this.log("Passthrough active. Final flush before close...");
+        // Wait another bit to capture any trailing echoes
+        await new Promise(r => setTimeout(r, 500));
+        if (this.rxBuffer.length > 0) {
+            this.log(`Late noise captured: ${this.toHex(this.rxBuffer)}`);
+            this.rxBuffer = [];
+        }
+
         this.log(">>> Calling close() to release port...");
         try {
             await this.close();

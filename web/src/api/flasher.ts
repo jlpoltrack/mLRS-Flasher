@@ -266,8 +266,44 @@ async function flashESP(
   sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
 
   // Give the browser extra time to fully release the port
-  sm.log("Waiting for port to fully release...");
+  sm.log("Waiting for port to fully release and stabilize...");
   await new Promise(r => setTimeout(r, 1000));
+
+  // BLIND PURGE: Force-open the port and "vacuum" any hidden noise
+  if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+      sm.log("Blind Purge: Checking for hidden noise in OS buffers...");
+      try {
+          await port.open({ baudRate: 115200 });
+          const reader = port.readable!.getReader();
+          let vacuumed = 0;
+          let bytes: number[] = [];
+          
+          while (true) {
+              const { value, done } = await Promise.race([
+                  reader.read(),
+                  new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Done")), 200))
+              ]).catch(() => ({ value: null, done: true }));
+
+              if (done || !value) break;
+              vacuumed += value.length;
+              for (let b of value) bytes.push(b);
+          }
+          
+          if (vacuumed > 0) {
+              const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+              const ascii = new TextDecoder().decode(Uint8Array.from(bytes)).replace(/[^\x20-\x7E]/g, '.');
+              sm.log(`Vacuumed ${vacuumed} hidden bytes: [HEX: ${hex}] [ASCII: ${ascii}]`);
+          } else {
+              sm.log("Blind Purge: No hidden noise found.");
+          }
+          
+          reader.releaseLock();
+          await port.close();
+      } catch (e) {
+          sm.log(`Blind Purge Warning: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      await new Promise(r => setTimeout(r, 500));
+  }
 
   // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port as any);
@@ -291,11 +327,22 @@ async function flashESP(
   });
 
   try {
-    // use no_reset for passthrough modes since DTR/RTS are disabled
-    const resetMode = (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') 
-        ? 'no_reset' as Before 
-        : (reset as Before || 'default_reset');
-    const chipName = await esploader.main(resetMode);
+    let chipName: string;
+    
+    if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+        // passthrough: skip stub upload - it crashes on slow serial links
+        sm.log("Passthrough mode: Using ROM loader (no stub)");
+        await esploader.connect('no_reset' as Before, 7, false);
+        await esploader.detectChip();
+        chipName = esploader.chip.CHIP_NAME;
+        sm.log(`Chip is ${await esploader.chip.getChipDescription(esploader)}`);
+        sm.log(`Features: ${await esploader.chip.getChipFeatures(esploader)}`);
+        sm.log(`Crystal is ${await esploader.chip.getCrystalFreq(esploader)}MHz`);
+        sm.log(`MAC: ${await esploader.chip.readMac(esploader)}`);
+    } else {
+        const resetMode = reset as Before || 'default_reset';
+        chipName = await esploader.main(resetMode);
+    }
     
     sm.log(`Detected chip: ${chipName}`);
 
