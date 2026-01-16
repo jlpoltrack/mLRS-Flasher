@@ -292,11 +292,23 @@ async function flashESP(
   try {
     let chipName: string;
     
-    // use no_reset for passthrough modes since DTR/RTS are disabled
     const resetMode = (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') 
         ? 'no_reset' as Before 
         : (reset as Before || 'default_reset');
     
+    // Optimize for passthrough modes
+    if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+        sm.log("Passthrough Mode: Optimizing block sizes for stub and flash (2KB).");
+        
+        // Reduce RAM block size for stub upload (Default is 0x1800 / 6KB)
+        esploader.ESP_RAM_BLOCK = 2048;
+        
+        // Reduce write block size for flash (Default is 0x4000 / 16KB)
+        esploader.FLASH_WRITE_SIZE = 2048; 
+        
+        sm.log(`Passthrough Mode: ESP_RAM_BLOCK=${esploader.ESP_RAM_BLOCK}, FLASH_WRITE_SIZE=${esploader.FLASH_WRITE_SIZE}`);
+    }
+
     chipName = await esploader.main(resetMode);
     
     sm.log(`Detected chip: ${chipName}`);
