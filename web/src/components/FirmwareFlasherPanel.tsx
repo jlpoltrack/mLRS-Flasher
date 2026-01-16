@@ -438,7 +438,7 @@ function FirmwareFlasherPanel({
                                     )}
 
                                     {flashMethod === FlashMethod.InavPassthrough && (
-                                    <div className="form-group span-3">
+                                    <div className="form-group span-2">
                                         <label>MSP Port</label>
                                         <div className="select-wrapper">
                                             <select
