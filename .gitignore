@@ -13,6 +13,11 @@ tools/win_dist/*
 tools/venv/*
 .DS_Store
 
+# electron app
+electron/node_modules/
+electron/dist/
+python/
+
 # Prerequisites
 *.d
 
@@ -28,9 +33,9 @@ tools/venv/*
 *.pch
 
 # Compiled Dynamic libraries
-*.so
+# *.so
 # *.dylib
-#*.dll
+# *.dll
 
 # Fortran module files
 *.mod
@@ -53,3 +58,7 @@ tools/venv/*
 
 # Virtual Env
 .venv/
+
+# FTP scripts (contain credentials)
+scripts/check-ftp.sh
+scripts/cleanup-ftp.sh

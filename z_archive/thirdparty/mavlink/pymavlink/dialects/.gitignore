@@ -1,0 +1,5 @@
+*.py
+*.xml
+!__init__.py
+!v10/ardupilotmega.py
+!v20/ardupilotmega.py

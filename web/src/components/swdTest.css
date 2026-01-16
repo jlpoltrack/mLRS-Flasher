@@ -1,0 +1,272 @@
+/* swd test page styles */
+/* date: 2026-01-14 */
+
+.swd-test {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+  max-width: 900px;
+}
+
+.swd-test-header {
+  margin-bottom: 0.5rem;
+}
+
+.swd-test-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--text-primary);
+}
+
+.swd-test-header p {
+  margin: 0.5rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.swd-test-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.swd-section {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-color);
+}
+
+.swd-section h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.swd-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.swd-buttons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.swd-buttons button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent-color);
+}
+
+.swd-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.swd-buttons button.primary {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: white;
+}
+
+.swd-buttons button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.swd-buttons button.danger {
+  background: var(--error-color);
+  border-color: var(--error-color);
+  color: white;
+}
+
+.swd-buttons button.danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.swd-buttons button.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.swd-info-box {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.swd-detail {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.swd-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.swd-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+}
+
+.swd-info-item label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.swd-info-item span {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+.swd-info-item .state-halted {
+  color: var(--warning-color);
+}
+
+.swd-info-item .state-running {
+  color: var(--success-color);
+}
+
+.swd-info-item .state-unknown {
+  color: var(--text-secondary);
+}
+
+/* log section */
+.swd-log-section {
+  flex-grow: 1;
+}
+
+.swd-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.swd-log-header h3 {
+  margin: 0;
+}
+
+.swd-log {
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 0.5rem;
+  min-height: 150px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 0.8rem;
+}
+
+.swd-log-empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.swd-log-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.swd-log-item:hover {
+  background: var(--bg-hover);
+}
+
+.swd-log-time {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.swd-log-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.swd-log-item.info .swd-log-icon {
+  color: var(--info-color, #3b82f6);
+}
+
+.swd-log-item.success .swd-log-icon {
+  color: var(--success-color);
+}
+
+.swd-log-item.error .swd-log-icon {
+  color: var(--error-color);
+}
+
+.swd-log-item.warn .swd-log-icon {
+  color: var(--warning-color);
+}
+
+.swd-log-msg {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.swd-log-item.error .swd-log-msg {
+  color: var(--error-color);
+}
+
+/* firmware section */
+.swd-firmware-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* progress bar */
+.swd-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.swd-progress-bar {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.swd-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-color), var(--success-color));
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+.swd-progress-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
