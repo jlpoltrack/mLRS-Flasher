@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-01-15
+// last updated: 2026-01-16
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -252,7 +252,7 @@ function FirmwareFlasherPanel({
       )}
       
       <div className="form-grid">
-        <div className="form-group span-2">
+        <div className="form-group span-1">
           <label>Device Type</label>
           <div className="select-wrapper">
             <select 
@@ -267,7 +267,7 @@ function FirmwareFlasherPanel({
           </div>
         </div>
 
-        <div className="form-group span-2">
+        <div className="form-group span-1">
           <label>Firmware Version</label>
           <div className="select-wrapper">
             <select 
@@ -317,7 +317,7 @@ function FirmwareFlasherPanel({
                             <>
                                 {(showSerialX && flashMethod === FlashMethod.APPassthru) ? (
                                     <>
-                                    <div className="form-group span-3">
+                                    <div className="form-group span-2">
                                         <label>Flash Method</label>
                                         <div className="select-wrapper">
                                         <select 
@@ -338,7 +338,7 @@ function FirmwareFlasherPanel({
                                         </div>
                                     </div>
                                     
-                                    <div className="form-group span-3">
+                                    <div className="form-group span-2">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
                                         <select 
