@@ -296,7 +296,7 @@ function FirmwareFlasherPanel({
                 <option>No files available</option>
               ) : (
                 firmwareFiles
-                  .filter(file => !isR9Rx || !file.filename.toLowerCase().endsWith('.elrs'))
+                  .filter(file => (!isR9Rx && !isR9Tx) || !file.filename.toLowerCase().endsWith('.elrs'))
                   .map(file => (
                   <option key={file.filename} value={file.filename}>{file.filename}</option>
                 ))
