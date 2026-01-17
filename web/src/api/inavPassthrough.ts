@@ -312,9 +312,7 @@ export class InavPassthroughService {
         }
     }
 
-    private clearBuffer() {
-        this.rxBuffer = [];
-    }
+
 
     async enterPassthrough(uartId: number, baud: number) {
         this.log(`Activating passthrough on UART ${uartId + 1} at ${baud} baud...`);
@@ -322,19 +320,19 @@ export class InavPassthroughService {
         // Ensure we are in CLI mode by sending newlines and hash
         await this.write(new TextEncoder().encode('\n\n#\n'));
         await new Promise(r => setTimeout(r, 500));
-        this.clearBuffer();
+
         
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
         await this.write(new TextEncoder().encode(cmd));
         
         // Wait for FC to switch - increased to ensure stabilization
         await new Promise(r => setTimeout(r, 500));
-        this.clearBuffer();
+
 
         this.log("Passthrough active.");
         // Wait another bit to capture any trailing echoes
         await new Promise(r => setTimeout(r, 500));
-        this.rxBuffer = [];
+
 
         try {
             await this.close();
