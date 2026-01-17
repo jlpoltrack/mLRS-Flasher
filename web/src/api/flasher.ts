@@ -248,7 +248,7 @@ async function flashESP(
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
   // Debug: Check port state
-  sm.log(`Port state check: readable=${!!port.readable}, writable=${!!port.writable}`);
+  // sm.log(`Port state check: readable=${!!port.readable}, writable=${!!port.writable}`);
   
   // Ensure port is closed (so esptool can open it) 
   if (port.readable || port.writable) {
@@ -263,10 +263,10 @@ async function flashESP(
       await new Promise(r => setTimeout(r, 500));
   }
   
-  sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
+  // sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
 
   // Give the browser extra time to fully release the port
-  sm.log("Waiting 500ms for port to fully stabilize...");
+  // sm.log("Waiting 500ms for port to fully stabilize...");
   await new Promise(r => setTimeout(r, 500));
 
   // @ts-ignore: ESPLoader types are not perfect
@@ -274,7 +274,7 @@ async function flashESP(
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
   if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
-      sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
+      // sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };
   }
@@ -284,8 +284,18 @@ async function flashESP(
     baudrate: baud,
     terminal: {
         clean: () => {},
-        writeLine: (data: string) => sm.log(data),
-        write: (data: string) => sm.log(data),
+        writeLine: (data: string) => { 
+            const trimmed = data.trim();
+            if (trimmed.length > 0 && trimmed !== 'esptool.js' && !trimmed.startsWith('Serial port')) {
+                sm.log(data); 
+            }
+        },
+        write: (data: string) => { 
+            const trimmed = data.trim();
+            if (trimmed.length > 0 && trimmed !== 'esptool.js' && !trimmed.startsWith('Serial port')) {
+                sm.log(data); 
+            }
+        },
     },
     romBaudrate: 115200,
   });
@@ -299,15 +309,15 @@ async function flashESP(
     
     // Optimize for passthrough modes
     if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
-        sm.log("Passthrough Mode: Optimizing block sizes for stub and flash (2KB).");
+        // sm.log("Passthrough Mode: Optimizing block sizes for stub and flash (4KB).");
         
         // Reduce RAM block size for stub upload (Default is 0x1800 / 6KB)
-        esploader.ESP_RAM_BLOCK = 2048;
+        //esploader.ESP_RAM_BLOCK = 4096;
         
         // Reduce write block size for flash (Default is 0x4000 / 16KB)
-        esploader.FLASH_WRITE_SIZE = 2048; 
+        //esploader.FLASH_WRITE_SIZE = 8192; 
         
-        sm.log(`Passthrough Mode: ESP_RAM_BLOCK=${esploader.ESP_RAM_BLOCK}, FLASH_WRITE_SIZE=${esploader.FLASH_WRITE_SIZE}`);
+        // sm.log(`Passthrough Mode: ESP_RAM_BLOCK=${esploader.ESP_RAM_BLOCK}, FLASH_WRITE_SIZE=${esploader.FLASH_WRITE_SIZE}`);
     }
 
     chipName = await esploader.main(resetMode);
