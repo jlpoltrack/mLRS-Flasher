@@ -2,12 +2,14 @@ name: Deploy to FTP
 
 on:
   push:
-    branches: [ "main", "web" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   web-deploy:
     name: Build and Deploy Web
+    environment:
+      name: prod
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
