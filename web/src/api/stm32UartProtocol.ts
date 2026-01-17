@@ -41,7 +41,7 @@ export class Stm32UartProtocol {
         this.flush();
 
         // wait a moment for bootloader to be ready (prevents initial timeout)
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
 
         // retry sync a few times
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -63,7 +63,7 @@ export class Stm32UartProtocol {
                 this.onLog?.(`Sync attempt ${attempt} failed: ${e.message}`);
             }
             
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
         }
         
         throw new Error("Failed to sync with bootloader after 3 attempts. Ensure device is in bootloader mode.");

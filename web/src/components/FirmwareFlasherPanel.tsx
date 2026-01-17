@@ -147,11 +147,9 @@ function FirmwareFlasherPanel({
         if (!port) return; 
         
         const service = new InavPassthroughService(port, (msg) => {
-            console.log(`[MSP] ${msg}`);
             // Provide feedback during scan for common issues
             if (msg.includes("Timeout")) setError(`Scan Timeout on ${selectedPort}: Ensure FC is disarmed and Configurator is closed.`);
             if (msg.includes("Header Timeout")) setError(`No response from FC on ${selectedPort}. Check wiring/baud.`);
-            if (msg.includes("Discarded")) console.warn(msg);
         });
         // We catch connect errors specifically to avoid noisy UI if port is busy/glitched
         try {

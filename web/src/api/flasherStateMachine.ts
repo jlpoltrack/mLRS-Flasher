@@ -46,7 +46,7 @@ export class FlasherStateMachine {
     }
 
     this.state = newState;
-    const msg = details ? `${this.readableState(newState)}: ${details}` : this.readableState(newState);
+    const msg = details || this.readableState(newState);
     
     // log the transition
     this.log(`State -> ${newState} (${msg})`);

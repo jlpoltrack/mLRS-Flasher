@@ -1,3 +1,4 @@
+// 2026-01-17
 import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
@@ -201,9 +202,9 @@ export async function initEdgeTXPassthrough(
         
         onLog?.("Power cycling RF module...");
         await executeCommand('set rfmod 0 power off');
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
         await executeCommand('set rfmod 0 power on');
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
 
         if (isWirelessBridge) {
             onLog?.("Waiting 7s for wireless bridge configuration...");
@@ -265,8 +266,8 @@ async function flashESP(
   sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
 
   // Give the browser extra time to fully release the port
-  sm.log("Waiting 2s for port to fully stabilize...");
-  await new Promise(r => setTimeout(r, 2000));
+  sm.log("Waiting 500ms for port to fully stabilize...");
+  await new Promise(r => setTimeout(r, 500));
 
   // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port as any);
@@ -417,7 +418,7 @@ async function flashESP(
     // Manual Reset Sequence (resets the ESP)
     await transport.setDTR(false);
     await transport.setRTS(true);
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 500));
     await transport.setRTS(false);
     
     await transport.disconnect();
@@ -435,9 +436,9 @@ async function flashESP(
         
         // toggle DTR to trigger main MCU reset
         await port.setSignals({ dataTerminalReady: false });
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 500));
         await port.setSignals({ dataTerminalReady: true });
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 500));
         await port.setSignals({ dataTerminalReady: false });
         
         writer.releaseLock();
@@ -894,8 +895,10 @@ async function flashSTM32UART(
             sm.updateProgress(progress);
 
             // Log progress every 10KB
-            if (totalWritten - lastLogBytes >= 10240) {
-                sm.log(`Written ${Math.floor(totalWritten / 1024)} KB...`);
+            const currentKb = Math.floor(totalWritten / 1024);
+            const lastKb = Math.floor(lastLogBytes / 1024);
+            if ((currentKb === 1 && lastKb === 0) || (currentKb >= 10 && Math.floor(currentKb / 10) > Math.floor(lastKb / 10))) {
+                sm.log(`Written ${currentKb} KB...`);
                 lastLogBytes = totalWritten;
             }
         }
@@ -932,8 +935,10 @@ async function flashSTM32UART(
             const progress = Math.round((totalWritten / totalSize) * 100);
             sm.updateProgress(progress);
 
-            if (totalWritten - lastLogBytes >= 10240) {
-                sm.log(`Verified ${Math.floor(totalWritten / 1024)} KB...`);
+            const currentKb = Math.floor(totalWritten / 1024);
+            const lastKb = Math.floor(lastLogBytes / 1024);
+            if ((currentKb === 1 && lastKb === 0) || (currentKb >= 10 && Math.floor(currentKb / 10) > Math.floor(lastKb / 10))) {
+                sm.log(`Verified ${currentKb} KB...`);
                 lastLogBytes = totalWritten;
             }
         }

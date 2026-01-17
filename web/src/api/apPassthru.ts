@@ -475,7 +475,7 @@ export async function initApPassthrough(
                      } catch(e) {}
                  }
                  if (reconnectedMav) break;
-                 await new Promise(r => setTimeout(r, 1000));
+                 await new Promise(r => setTimeout(r, 500));
              }
              
              if (!reconnectedMav) throw new Error("Timed out waiting for device reconnection.");
@@ -485,18 +485,18 @@ export async function initApPassthrough(
              
              // Restore Passthrough
              onLog?.("Restoring Passthrough...");
-             await new Promise(r => setTimeout(r, 1000)); // Boot settle
+             await new Promise(r => setTimeout(r, 500)); // Boot settle
              await mav.paramSet(pProtocolName, 2);
              await mav.paramSet("SERIAL_PASSTIMO", 0);
              await mav.paramSet("SERIAL_PASS2", serialIndex);
-             await new Promise(r => setTimeout(r, 1500));
+             await new Promise(r => setTimeout(r, 500));
         } else {
              // Already in 28. Ensure passthrough.
              onLog?.("ESP in Scripting Mode. Resetting to Passthrough...");
              await mav.paramSet(pProtocolName, 2);
              await mav.paramSet("SERIAL_PASSTIMO", 0);
              await mav.paramSet("SERIAL_PASS2", serialIndex);
-             await new Promise(r => setTimeout(r, 1500));
+             await new Promise(r => setTimeout(r, 500));
         }
         
         onLog?.("ESP Ready for Flashing.");
@@ -510,7 +510,7 @@ export async function initApPassthrough(
         await mav.paramSet(pProtocolName, 2);
         await mav.paramSet("SERIAL_PASSTIMO", 0);
         await mav.paramSet("SERIAL_PASS2", serialIndex);
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 500));
     }
 
     try {
@@ -559,7 +559,7 @@ export async function initApPassthrough(
         onLog?.("mLRS receiver jumps to system bootloader in 5 seconds");
 
         // Wait minor delay for reboot
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
 
         onLog?.("PASSTHROUGH READY FOR PROGRAMMING TOOL");
         return { port: activePort, baudRate: receiverBaud };

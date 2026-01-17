@@ -1,4 +1,4 @@
-// 2026-01-16
+// 2026-01-17
 const MSP2_COMMON_SERIAL_CONFIG = 0x1009;  // Common MSP V2 (4105)
 
 // Serial Port Functions (Bitmask)
@@ -26,6 +26,7 @@ export class InavPassthroughService {
     private onLog?: (msg: string) => void;
     private rxBuffer: number[] = [];
     private reading = false;
+    private readResolver: (() => void) | null = null;
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
         this.port = port;
@@ -42,7 +43,7 @@ export class InavPassthroughService {
 
     private async write(data: Uint8Array) {
         if (!this.writer) throw new Error("Port not open");
-        this.log(`WRITE: ${this.toHex(data)}`);
+        // this.log(`WRITE: ${this.toHex(data)}`);
         await this.writer.write(data);
     }
 
@@ -51,7 +52,6 @@ export class InavPassthroughService {
         this.reading = true;
         this.reader = this.port.readable.getReader();
 
-        this.log("Background reader started.");
         try {
             while (this.reading) {
                 const { value, done } = await this.reader.read();
@@ -60,38 +60,46 @@ export class InavPassthroughService {
                     for (let i = 0; i < value.length; i++) {
                         this.rxBuffer.push(value[i]);
                     }
+                    if (this.readResolver) {
+                        this.readResolver();
+                        this.readResolver = null;
+                    }
                 }
             }
         } catch (e: any) {
             this.log(`Read loop error: ${e?.message || e}`);
         } finally {
             this.reading = false;
-            try { this.reader.releaseLock(); } catch {}
+            try { this.reader?.releaseLock(); } catch {}
             this.reader = null;
-            this.log("Background reader stopped.");
         }
     }
 
     private async read(length: number, timeout = 1000): Promise<Uint8Array> {
-        const buffer = new Uint8Array(length);
-        let received = 0;
         const startTime = Date.now();
-
-        while (received < length) {
-            if (this.rxBuffer.length > 0) {
-                buffer[received++] = this.rxBuffer.shift()!;
-                continue;
-            }
-
-            if (Date.now() - startTime > timeout) {
-                this.log(`READ TIMEOUT: Got ${received}/${length}. Data: ${this.toHex(buffer.slice(0, received))}`);
+        
+        while (this.rxBuffer.length < length) {
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= timeout) {
+                const received = Uint8Array.from(this.rxBuffer);
+                this.log(`READ TIMEOUT: Got ${this.rxBuffer.length}/${length}. Data: ${this.toHex(received)}`);
                 throw new Error("Read timeout");
             }
 
-            // Small delay to prevent busy looping
-            await new Promise(r => setTimeout(r, 10));
+            await new Promise<void>((resolve) => {
+                this.readResolver = resolve;
+                setTimeout(() => {
+                    if (this.readResolver === resolve) {
+                        this.readResolver = null;
+                        resolve();
+                    }
+                }, Math.min(100, timeout - elapsed));
+            });
         }
-        return buffer;
+
+        const result = new Uint8Array(this.rxBuffer.slice(0, length));
+        this.rxBuffer = this.rxBuffer.slice(length);
+        return result;
     }
 
     private async readByte(timeout = 1000): Promise<number> {
@@ -109,9 +117,9 @@ export class InavPassthroughService {
             if (byte === null) continue;
 
             if (byte === 36) { // '$'
-                const next1 = await this.readByte(200).catch(() => null);
+                const next1 = await this.readByte(500).catch(() => null);
                 if (next1 === 88) { // 'X'
-                    const next2 = await this.readByte(200).catch(() => null);
+                    const next2 = await this.readByte(500).catch(() => null);
                     if (next2 === 62) return '$X>'; // success
                     if (next2 === 33) return '$X!'; // error
                 }
@@ -151,7 +159,6 @@ export class InavPassthroughService {
         const crc = this.crc8DvbS2(crcData);
         const packet = new Uint8Array([36, 88, 60, ...crcData, crc]);
 
-        this.log(`SEND V2 [${cmd}]`);
         // clear buffer before sending
         this.rxBuffer = [];
         await this.write(packet);
@@ -178,15 +185,12 @@ export class InavPassthroughService {
     }
 
     async connect() {
-        this.log("Initializing Web Serial connection...");
         this.rxBuffer = [];
         this.reading = false;
 
         // Force closure and re-open to ensure correct baud rate and clean state
         if (this.port.readable || this.port.writable) {
-            this.log("Port was already open, cycling state...");
-            
-            // Release any existing locks before closing
+            // Signal read loop to stop
             this.reading = false;
             if (this.reader) {
                 try { await this.reader.cancel(); } catch {}
@@ -199,31 +203,22 @@ export class InavPassthroughService {
             }
             
             // Small delay for stream cleanup
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 500));
             
             try { 
                 await this.port.close(); 
-                this.log("Port closed for cycling.");
             } catch (e: any) {
-                this.log(`Port close during cycle failed: ${e?.message || e}`);
             }
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
         }
         
-        this.log("Opening port at 115200...");
         await this.port.open({ baudRate: 115200 });
 
-        this.log("Configuring control lines (DTR/RTS)...");
-        await this.port.setSignals({ dataTerminalReady: true, requestToSend: true });
-        
         this.writer = this.port.writable!.getWriter();
         this.readingPromise = this.startReading();
         
-        this.log("Waiting for FC to settle...");
-        await new Promise(r => setTimeout(r, 1000));
-        const initialGarbage = this.rxBuffer.length;
+        await new Promise(r => setTimeout(r, 500));
         this.rxBuffer = [];
-        if (initialGarbage > 0) this.log(`Cleared ${initialGarbage} bytes from settle period.`);
     }
 
     /**
@@ -231,64 +226,49 @@ export class InavPassthroughService {
      * Use this for temporary disconnection when you need to reuse the same port later.
      */
     async disconnect() {
-        this.log("Disconnecting (releasing locks)...");
-        
         // Signal read loop to stop
         this.reading = false;
         
         // Cancel reader to unblock read()
         if (this.reader) {
-            this.log("Cancelling reader...");
             try { 
                 await this.reader.cancel(); 
-            } catch (e: any) {
-                this.log(`Reader cancel: ${e?.message || e}`);
-            }
+            } catch (e: any) {}
         }
         
         // Wait for the background reader to fully exit
         if (this.readingPromise) {
-            this.log("Waiting for reader loop to exit...");
             try {
                 await this.readingPromise;
-            } catch (e: any) {
-                this.log(`Reader loop exit: ${e?.message || e}`);
-            }
+            } catch (e: any) {}
             this.readingPromise = null;
         }
         
         // Final cleanup in case reader wasn't fully released
         if (this.reader) {
-            this.log("Force-releasing reader lock...");
             try { this.reader.releaseLock(); } catch {}
             this.reader = null;
         }
         
         // Release writer lock
         if (this.writer) {
-            this.log("Releasing writer lock...");
             try { this.writer.releaseLock(); } catch {}
             this.writer = null;
         }
-        
-        this.log("Disconnect complete.");
     }
 
     /**
      * Fully close the serial port. Call this when completely done with the port.
      */
     async close() {
-        this.log("Closing serial connection...");
-        
         // First release all locks
         await this.disconnect();
         
         // Now close the port
         try { 
             await this.port.close(); 
-            this.log("Port closed successfully.");
             // give the OS time to fully release the port
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
         } catch (e: any) {
             this.log(`Port close error: ${e?.message || e}`);
             throw e; // Re-throw so caller knows it failed
@@ -296,7 +276,6 @@ export class InavPassthroughService {
     }
 
     async getMspPorts(): Promise<MspPort[]> {
-        this.log("Requesting serial configuration...");
         try {
             const payload = await this.sendMspV2Command(MSP2_COMMON_SERIAL_CONFIG);
             
@@ -333,57 +312,33 @@ export class InavPassthroughService {
         }
     }
 
+    private logNoise() {
+        this.rxBuffer = [];
+    }
+
     async enterPassthrough(uartId: number, baud: number) {
-        this.log(">>> enterPassthrough() started.");
-        this.log(`Commanding FC to redirect UART ${uartId + 1} at ${baud} baud...`);
+        this.log(`Activating passthrough on UART ${uartId + 1} at ${baud} baud...`);
         
         // Ensure we are in CLI mode by sending newlines and hash
         await this.write(new TextEncoder().encode('\n\n#\n'));
-        this.log("Waiting 1500ms for CLI to stabilize...");
-        await new Promise(r => setTimeout(r, 1500));
-        
-        // Log what we got back from the prefix
-        const entryNoiseCount = this.rxBuffer.length;
-        if (entryNoiseCount > 0) {
-            const noise = Uint8Array.from(this.rxBuffer);
-            const ascii = new TextDecoder().decode(noise).replace(/[^\x20-\x7E]/g, '.');
-            this.log(`CLI Entry Noise (${entryNoiseCount} bytes): [HEX: ${this.toHex(this.rxBuffer)}] [ASCII: ${ascii}]`);
-            this.rxBuffer = [];
-        } else {
-            this.log("CLI Entry: No noise detected in buffer.");
-        }
+        await new Promise(r => setTimeout(r, 500));
+        this.logNoise();
         
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
         await this.write(new TextEncoder().encode(cmd));
         
         // Wait for FC to switch - increased to ensure stabilization
-        this.log("Waiting 1500ms for passthrough to activate...");
-        await new Promise(r => setTimeout(r, 1500));
-        
-        const noiseCount = this.rxBuffer.length;
-        if (noiseCount > 0) {
-            const noise = Uint8Array.from(this.rxBuffer);
-            const ascii = new TextDecoder().decode(noise).replace(/[^\x20-\x7E]/g, '.');
-            this.log(`Transition Noise (${noiseCount} bytes): [HEX: ${this.toHex(this.rxBuffer)}] [ASCII: ${ascii}]`);
-            this.rxBuffer = [];
-        } else {
-            this.log("Transition: No noise detected in buffer.");
-        }
+        await new Promise(r => setTimeout(r, 500));
+        this.logNoise();
 
-        this.log("Passthrough active. Final flush before close...");
+        this.log("Passthrough active.");
         // Wait another bit to capture any trailing echoes
         await new Promise(r => setTimeout(r, 500));
-        if (this.rxBuffer.length > 0) {
-            this.log(`Late noise captured: ${this.toHex(this.rxBuffer)}`);
-            this.rxBuffer = [];
-        }
+        this.rxBuffer = [];
 
-        this.log(">>> Calling close() to release port...");
         try {
             await this.close();
-            this.log(">>> close() completed successfully.");
         } catch (e: any) {
-            this.log(`>>> close() FAILED: ${e?.message || e}`);
             throw e;
         }
     }
