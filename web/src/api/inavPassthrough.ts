@@ -312,7 +312,7 @@ export class InavPassthroughService {
         }
     }
 
-    private logNoise() {
+    private clearBuffer() {
         this.rxBuffer = [];
     }
 
@@ -322,14 +322,14 @@ export class InavPassthroughService {
         // Ensure we are in CLI mode by sending newlines and hash
         await this.write(new TextEncoder().encode('\n\n#\n'));
         await new Promise(r => setTimeout(r, 500));
-        this.logNoise();
+        this.clearBuffer();
         
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
         await this.write(new TextEncoder().encode(cmd));
         
         // Wait for FC to switch - increased to ensure stabilization
         await new Promise(r => setTimeout(r, 500));
-        this.logNoise();
+        this.clearBuffer();
 
         this.log("Passthrough active.");
         // Wait another bit to capture any trailing echoes
