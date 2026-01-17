@@ -1,44 +1,36 @@
 // stm32 uart bootloader protocol implementation
 // implements AN3155 USART protocol for STM32 bootloader communication
 
+import { BufferedSerial } from './bufferedSerial';
+
 /**
  * STM32 UART bootloader protocol handler
  * implements synchronization, read/write/erase commands per AN3155
  */
 export class Stm32UartProtocol {
-    private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-    private port: SerialPort;
+    private serial: BufferedSerial;
     private onLog?: (msg: string) => void;
     private commands: number[] = [];
-    private rxBuffer: number[] = [];
-    private readLoopActive = false;
-    private readResolver: (() => void) | null = null;
-
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
-        this.port = port;
+        this.serial = new BufferedSerial(port, onLog);
         this.onLog = onLog;
     }
 
     async connect() {
-        // Check if port is already open (has a readable stream)
-        const isAlreadyOpen = !!this.port.readable;
-
-        if (isAlreadyOpen) {
-             this.onLog?.("Port already open, using existing connection (Passthrough Mode).");
-        } else {
-             // explicitly set 8E1 and signals to match stm-serial-flasher reference state
-             await (this.port as any).open({ baudRate: 115200, parity: 'even', stopBits: 1 });
+        // Check if port is already open (in a way the BufferedSerial might know or we can infer)
+        // With BufferedSerial, we usually just call connect(). 
+        // However, we want to respect the "already open" passthrough logic if possible.
+        // We'll trust the BufferedSerial.connect to handle re-opening or options update.
+        
+        try {
+            await this.serial.connect({ baudRate: 115200, parity: 'even', stopBits: 1 });
+        } catch (e) {
+            this.onLog?.("Connection might already be active or failed, checking sync...");
         }
         
-        this.reader = this.port.readable!.getReader();
-        this.writer = this.port.writable!.getWriter();
-
-        this.startReadLoop();
-
         this.onLog?.("Flushing serial buffer...");
-        this.flush();
+        this.serial.flush();
 
         // wait a moment for bootloader to be ready (prevents initial timeout)
         await new Promise(r => setTimeout(r, 500));
@@ -47,8 +39,8 @@ export class Stm32UartProtocol {
         for (let attempt = 1; attempt <= 3; attempt++) {
             this.onLog?.(`[TX] Sync (0x7F) - Attempt ${attempt}...`);
             try {
-                await this.write(new Uint8Array([0x7F]));
-                const resp = await this.read(1, 1500); // 1.5s timeout
+                await this.serial.write(new Uint8Array([0x7F]));
+                const resp = await this.serial.read(1, 1500); // 1.5s timeout
                 
                 if (resp[0] === 0x79) {
                     this.onLog?.("[RX] Sync ACK (0x79) - OK.");
@@ -70,55 +62,19 @@ export class Stm32UartProtocol {
     }
 
     async disconnect() {
-        this.readLoopActive = false;
-        if (this.reader) {
-            try { await this.reader.cancel(); } catch(e) { /* ignore */ }
-            this.reader.releaseLock();
-            this.reader = null;
-        }
-        if (this.writer) {
-            this.writer.releaseLock();
-            this.writer = null;
-        }
-        try { await this.port.close(); } catch(e) { /* ignore */ }
-    }
-
-    private startReadLoop() {
-        if (this.readLoopActive) return;
-        this.readLoopActive = true;
-        (async () => {
-            try {
-                while (this.readLoopActive) {
-                    const { value, done } = await this.reader!.read();
-                    if (done) break;
-                    if (value) {
-                        const arr = Array.from(value);
-                        this.rxBuffer.push(...arr);
-                        if (this.readResolver) this.readResolver();
-                    }
-                }
-            } catch (e) {
-                // ignore errors during close
-            } finally {
-                this.readLoopActive = false;
-            }
-        })();
-    }
-
-    private flush() {
-        this.rxBuffer = [];
+        await this.serial.close();
     }
 
     async get() {
         // CMD_GET = 0x00
         await this.sendCommand(0x00);
         
-        const lenBuf = await this.read(1);
+        const lenBuf = await this.serial.read(1);
         const len = lenBuf[0]; // N = number of bytes to follow - 1
         
         // read the rest of the payload (N + 1 bytes)
         // this payload contains [Version, Command1, Command2, ...]
-        const payload = await this.read(len + 1);
+        const payload = await this.serial.read(len + 1);
         
         const version = payload[0];
         this.commands = Array.from(payload.slice(1));
@@ -131,7 +87,7 @@ export class Stm32UartProtocol {
         // CMD_GET_ID = 0x02
         await this.sendCommand(0x02);
         
-        const lenBuf = await this.read(1);
+        const lenBuf = await this.serial.read(1);
         const len = lenBuf[0]; // N = number of bytes to follow - 1
         
         // payload: [PID] 
@@ -139,7 +95,7 @@ export class Stm32UartProtocol {
         // then N+1 bytes. 
         // example: 0x01 (len=1) -> 0x04 0x10 (ID=0x410)
         
-        const payload = await this.read(len + 1);
+        const payload = await this.serial.read(len + 1);
         await this.waitAck();
         
         if (payload.length >= 2) {
@@ -163,14 +119,6 @@ export class Stm32UartProtocol {
             throw new Error("No supported erase command found");
         }
 
-        // use extended erase (0x44) if available as it supports 2-byte page codes
-        // standard erase (0x43) supports 1-byte page codes (0-255).
-        // if we have pages > 255, we must use 0x44.
-
-        // chunk pages to avoid packet size limits (max 255 bytes payload)
-        // each page is 2 bytes in extended (plus 2 bytes count).
-        // max pages per command ~125.
-        
         const CHUNK_SIZE = USE_EXTENDED ? 60 : 250; // safe limits
 
         for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
@@ -199,7 +147,7 @@ export class Stm32UartProtocol {
                 }
                 
                 data[data.length - 1] = checksum;
-                await this.write(data);
+                await this.serial.write(data);
                 
             } else {
                 // standard erase 0x43 (0xFF is not used here)
@@ -218,7 +166,7 @@ export class Stm32UartProtocol {
                     checksum ^= page;
                 }
                 data[data.length - 1] = checksum;
-                await this.write(data);
+                await this.serial.write(data);
             }
             
             await this.waitAck(5000 + N * 50); // give time for erase
@@ -239,13 +187,13 @@ export class Stm32UartProtocol {
             await this.sendCommand(CMD_EXTENDED_ERASE);
             // global erase payload: 0xFFFF + checksum
             // 0xFF 0xFF -> XOR is 0x00.
-            await this.write(new Uint8Array([0xFF, 0xFF, 0x00]));
+            await this.serial.write(new Uint8Array([0xFF, 0xFF, 0x00]));
             await this.waitAck(30000); // erase is slow
         } else if (this.commands.includes(CMD_ERASE)) {
             // standard erase (0x43)
             // 0x43 -> ACK -> 0xFF (All) -> 0x00 (Checksum) -> ACK
             await this.sendCommand(CMD_ERASE);
-            await this.write(new Uint8Array([0xFF, 0x00]));
+            await this.serial.write(new Uint8Array([0xFF, 0x00]));
             await this.waitAck(30000);
         } else {
             throw new Error("No supported erase command found (checked 0x43, 0x44)");
@@ -263,7 +211,7 @@ export class Stm32UartProtocol {
         addrBuf[2] = (address >> 8) & 0xFF;
         addrBuf[3] = address & 0xFF;
         addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // checksum
-        await this.write(addrBuf);
+        await this.serial.write(addrBuf);
         await this.waitAck(); // ACK after address
 
         // send data
@@ -280,7 +228,7 @@ export class Stm32UartProtocol {
         dataBuf.set(data, 1);
         dataBuf[dataBuf.length - 1] = checksum;
         
-        await this.write(dataBuf);
+        await this.serial.write(dataBuf);
         await this.waitAck(); // ACK after data
     }
 
@@ -297,60 +245,27 @@ export class Stm32UartProtocol {
         addrBuf[2] = (address >> 8) & 0xFF;
         addrBuf[3] = address & 0xFF;
         addrBuf[4] = addrBuf[0] ^ addrBuf[1] ^ addrBuf[2] ^ addrBuf[3]; // checksum
-        await this.write(addrBuf);
+        await this.serial.write(addrBuf);
         await this.waitAck(); // ACK after address
 
         // send N (length - 1) + Checksum (~N)
         const N = length - 1;
-        await this.write(new Uint8Array([N, N ^ 0xFF]));
+        await this.serial.write(new Uint8Array([N, N ^ 0xFF]));
         await this.waitAck(); // ACK after length
 
-        return await this.read(length);
+        return await this.serial.read(length);
     }
 
     private async sendCommand(cmd: number) {
         const buf = new Uint8Array([cmd, cmd ^ 0xFF]);
-        await this.write(buf);
+        await this.serial.write(buf);
         await this.waitAck();
     }
 
     private async waitAck(timeout = 2000) {
-        const resp = await this.read(1, timeout);
+        const resp = await this.serial.read(1, timeout);
         if (resp[0] !== 0x79) {
             throw new Error(`Expected ACK (0x79), got 0x${resp[0].toString(16)}`);
         }
-    }
-
-    private async write(data: Uint8Array) {
-        await this.writer!.write(data);
-    }
-
-    private async read(len: number, timeout = 1000): Promise<Uint8Array> {
-        const startTime = Date.now();
-        
-        while (this.rxBuffer.length < len) {
-            const elapsed = Date.now() - startTime;
-            const remaining = timeout - elapsed;
-            
-            if (remaining <= 0) throw new Error("Read timeout");
-            
-            await new Promise<void>((resolve) => {
-                // Set up the resolver that startReadLoop will call
-                this.readResolver = resolve;
-                
-                // Also set a timeout to force wake up if no data comes
-                setTimeout(() => {
-                    // If we timed out, clear the resolver so startReadLoop doesn't call a stale one
-                    if (this.readResolver === resolve) {
-                        this.readResolver = null;
-                        resolve();
-                    }
-                }, remaining);
-            });
-        }
-        
-        const result = new Uint8Array(this.rxBuffer.slice(0, len));
-        this.rxBuffer = this.rxBuffer.slice(len);
-        return result;
     }
 }
