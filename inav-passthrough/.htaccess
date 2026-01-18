@@ -1,0 +1,9 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Value from vite.config.ts base
+  RewriteBase /mlrs/flash/
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /mlrs/flash/index.html [L]
+</IfModule>
