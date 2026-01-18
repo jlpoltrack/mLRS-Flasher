@@ -127,8 +127,8 @@ export async function flash(
         }
         const svc = new InavPassthroughService(port as SerialPort, onLog);
         await svc.connect();
-        await svc.enterPassthrough(options.passthroughIdentifier, 115200);
-        options.baud = 115200;
+        await svc.enterPassthrough(options.passthroughIdentifier, 921600);
+        options.baud = 921600;
      }
 
      return flashESP(port as SerialPort, firmwareData, options);
