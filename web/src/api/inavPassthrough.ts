@@ -9,9 +9,12 @@ import {
     FUNCTION_TELEMETRY_SMARTPORT, 
     FUNCTION_VTX_SMARTAUDIO, 
     FUNCTION_VTX_TRAMP, 
-    FUNCTION_TELEMETRY_MAVLINK 
+    FUNCTION_TELEMETRY_MAVLINK,
+    MSP_REBOOT
 } from './mspV2Protocol';
 import type { MspPort } from './mspV2Protocol';
+
+const REBOOT_WAIT_MS = 2000;
 
 export type { MspPort };
 
@@ -79,7 +82,7 @@ export class InavPassthroughService {
         }
     }
 
-    async enterPassthrough(uartId: number, baud: number) {
+    async enterPassthrough(uartId: number, baud: number, sendReboot: boolean = false) {
         this.log(`Activating passthrough on UART ${uartId + 1} at ${baud} baud...`);
         
         // Ensure we are in CLI mode by sending newlines and hash
@@ -95,6 +98,24 @@ export class InavPassthroughService {
         this.log("Passthrough active.");
         // wait another bit to capture any trailing echoes
         await new Promise(r => setTimeout(r, 500));
+
+        if (sendReboot) {
+            this.log("Sending MSP Reboot command to Rx...");
+            try {
+                // Magic number 1234321 = 0x0012D591 (Little Endian: 91 D5 12 00)
+                const payload = [0x91, 0xD5, 0x12, 0x00];
+                await this.msp.sendCommand(MSP_REBOOT, payload);
+                this.log("MSP Reboot ACK received...");
+            } catch (e: any) {
+                // For reboot command, a timeout is often expected as the device reboots immediately
+                // preventing it from sending an ACK.
+                this.log(`Rx reboot command sent (no ACK received, proceeding). Error: ${e.message}`);
+            }
+            
+            // wait for reboot to complete
+            this.log(`Waiting ${REBOOT_WAIT_MS}ms for receiver to reboot...`);
+            await new Promise(r => setTimeout(r, REBOOT_WAIT_MS));
+        }
 
         await this.close();
     }

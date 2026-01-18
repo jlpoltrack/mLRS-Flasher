@@ -76,7 +76,8 @@ export async function flash(
              }
              const svc = new InavPassthroughService(port as SerialPort, onLog);
              await svc.connect();
-             await svc.enterPassthrough(options.passthroughIdentifier, 115200);
+             // For STM32, we send the special reboot command to force bootloader
+             await svc.enterPassthrough(options.passthroughIdentifier, 115200, true);
              options.baud = 115200;
         }
         return flashSTM32UART(port as SerialPort, firmwareData, options);

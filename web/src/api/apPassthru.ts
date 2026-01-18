@@ -1,5 +1,6 @@
 import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkProtocolV2, minimal, common } from 'node-mavlink';
 import type { MavLinkPacket } from 'node-mavlink';
+const REBOOT_WAIT_MS = 2000;
 
 // ------------------------------------
 // Message Definitions
@@ -556,10 +557,10 @@ export async function initApPassthrough(
         await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 2, 0, 3, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 2);
         
         onLog?.("mLRS receiver reboot shutdown DONE");
-        onLog?.("mLRS receiver jumps to system bootloader in 5 seconds");
+        onLog?.("mLRS receiver jumps to system bootloader in 2 seconds");
 
-        // Wait minor delay for reboot
-        await new Promise(r => setTimeout(r, 500));
+        // wait for reboot
+        await new Promise(r => setTimeout(r, REBOOT_WAIT_MS));
 
         onLog?.("PASSTHROUGH READY FOR PROGRAMMING TOOL");
         return { port: activePort, baudRate: receiverBaud };

@@ -7,6 +7,8 @@ export interface MspPort {
 }
 
 export const MSP2_COMMON_SERIAL_CONFIG = 0x1009;
+export const MSP_REBOOT = 68;
+
 
 // Serial Port Functions (Bitmask)
 export const FUNCTION_MSP = (1 << 0);
