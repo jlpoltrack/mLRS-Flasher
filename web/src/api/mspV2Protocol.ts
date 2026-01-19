@@ -4,6 +4,7 @@ export interface MspPort {
     index: number;
     name: string;
     functions: string[];
+    baudRate?: number;
 }
 
 export const MSP2_COMMON_SERIAL_CONFIG = 0x1009;

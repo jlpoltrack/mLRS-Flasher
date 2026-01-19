@@ -16,6 +16,13 @@ import type { MspPort } from './mspV2Protocol';
 
 const REBOOT_WAIT_MS = 2000;
 
+const INAV_BAUD_RATES = [
+    0, // auto
+    1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 
+    230400, 250000, 400000, 460800, 500000, 
+    921600, 1000000, 1500000, 2000000, 2470000
+];
+
 export type { MspPort };
 
 export class InavPassthroughService {
@@ -57,6 +64,8 @@ export class InavPassthroughService {
                 const offset = i * ENTRY_SIZE;
                 const id = payload[offset];
                 const mask = payload[offset + 1] | (payload[offset + 2] << 8) | (payload[offset + 3] << 16) | (payload[offset + 4] << 24);
+                const mspBaudIndex = payload[offset + 5];
+                
                 const functions: string[] = [];
                 if (mask & FUNCTION_MSP) functions.push('MSP');
                 if (mask & FUNCTION_GPS) functions.push('GPS');
@@ -67,9 +76,11 @@ export class InavPassthroughService {
                 if (mask & FUNCTION_VTX_TRAMP) functions.push('Tramp');
                 if (mask & FUNCTION_TELEMETRY_MAVLINK) functions.push('Mavlink');
                 if (id < 20 && (mask & FUNCTION_MSP)) {
+                     const baudRate = INAV_BAUD_RATES[mspBaudIndex] || 115200;
                      ports.push({
                          index: id,
-                         name: `UART ${id + 1}${functions.length > 0 ? ` (${functions.join(', ')})` : ''}`,
+                         baudRate: baudRate,
+                         name: `UART ${id + 1}${functions.length > 0 ? ` (${functions.join(', ')}, ${baudRate})` : ''}`,
                          functions: functions
                      });
                 }
