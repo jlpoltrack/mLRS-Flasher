@@ -41,7 +41,6 @@ function App() {
 
   // load initial data on mount
   useEffect(() => {
-    console.log(`%cmLRS Flasher v${__APP_VERSION__}`, 'color: #3b82f6; font-weight: bold; font-size: 1.2em;');
     clearFlasherSelections();
     
     async function loadInitialData() {
