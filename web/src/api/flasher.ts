@@ -2,7 +2,7 @@
 import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
-import { initApPassthrough } from './apPassthru';
+import { initArduPilotPassthrough } from './ardupilotPassthrough';
 import { InavPassthroughService } from './inavPassthrough';
 import { FlasherStateMachine } from './flasherStateMachine';
 import { parseHex } from './hexParser';
@@ -57,13 +57,13 @@ export async function flash(
         }
         return flashSTM32DFU(port as USBDevice, firmwareData, options);
     } else {
-        if (flashMethod === 'appassthru') {
+        if (flashMethod === 'ardupilot_passthrough') {
             if (!options.passthroughSerial) {
-                throw new Error("Passthrough Serial port not specified for AP Passthrough");
+                throw new Error("Passthrough Serial port not specified for ArduPilot Passthrough");
             }
             
             const isEsp = chipset.startsWith('esp');
-            const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, isEsp, onLog);
+            const result = await initArduPilotPassthrough(port as SerialPort, options.passthroughSerial, isEsp, onLog);
             port = result.port;
             
             // For STM32, if we didn't force 115200, we might need to tell the flasher to use the detected baud
@@ -124,14 +124,14 @@ export async function flash(
          await new Promise(r => setTimeout(r, 500));
      }
 
-     // Handle AP Passthru for ESP
-     if (flashMethod === 'appassthru') {
+     // Handle ArduPilot Passthrough for ESP
+     if (flashMethod === 'ardupilot_passthrough') {
         if (!options.passthroughSerial) {
-            throw new Error("Passthrough Serial port not specified for AP Passthrough");
+            throw new Error("Passthrough Serial port not specified for ArduPilot Passthrough");
         }
-        const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
+        const result = await initArduPilotPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
         port = result.port;
-        // ESP always forced to 115200 by initApPassthrough logic
+        // ESP always forced to 115200 by initArduPilotPassthrough logic
      } else if (flashMethod === 'inav_passthrough') {
         if (options.passthroughIdentifier === undefined) {
             throw new Error("Target UART not specified for INAV Passthrough");
@@ -284,7 +284,7 @@ async function flashESP(
   const transport = new Transport(port as any);
 
   // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
-  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') {
       // sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };
@@ -314,12 +314,12 @@ async function flashESP(
   try {
     let chipName: string;
     
-    const resetMode = (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') 
+    const resetMode = (flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') 
         ? 'no_reset' as Before 
         : (reset as Before || 'default_reset');
     
     // Optimize for passthrough modes
-    if (flashMethod === 'appassthru' || flashMethod === 'inav_passthrough') {
+    if (flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') {
         // sm.log("Passthrough Mode: Optimizing block sizes for stub and flash (4KB).");
         
         // Reduce RAM block size for stub upload (Default is 0x1800 / 6KB)

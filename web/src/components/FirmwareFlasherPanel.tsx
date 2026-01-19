@@ -5,7 +5,7 @@ import { useStlinkDevices } from '../hooks/useStlinkDevices';
 import { api } from '../api/webSerialApi';
 import { findPortByName } from '../api/hardwareService';
 import { InavPassthroughService, type MspPort } from '../api/inavPassthrough';
-import { ApPassthroughService, type ApSerialPort } from '../api/apPassthru';
+import { ArduPilotPassthroughService, type ArduPilotSerialPort } from '../api/ardupilotPassthrough';
 import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
@@ -47,10 +47,10 @@ function FirmwareFlasherPanel({
   const [isScanningMsp, setIsScanningMsp] = useState(false);
   const [targetUartIndex, setTargetUartIndex] = usePersistentState(`flasher_${targetType}_inavTargetUart`, '');
 
-  const [apPorts, setApPorts] = useState<ApSerialPort[]>([]);
+  const [apPorts, setApPorts] = useState<ArduPilotSerialPort[]>([]);
   const [isScanningAp, setIsScanningAp] = useState(false);
   const apScanAbortRef = useRef(false);
-  const apServiceRef = useRef<ApPassthroughService | null>(null);
+  const apServiceRef = useRef<ArduPilotPassthroughService | null>(null);
 
   // remove explicit state resets when switching between pages (target types)
   // as we now use targetType-specific keys in localStorage
@@ -138,7 +138,7 @@ function FirmwareFlasherPanel({
 
   // Auto-scan AP ports when method or port changes
   useEffect(() => {
-    if (flashMethod === FlashMethod.APPassthru && selectedPort) {
+    if (flashMethod === FlashMethod.ArduPilotPassthrough && selectedPort) {
         apScanAbortRef.current = false;
         const timer = setTimeout(() => scanApPorts(), 100);
         return () => {
@@ -149,7 +149,7 @@ function FirmwareFlasherPanel({
                 apServiceRef.current.disconnect().catch(() => {});
             }
         };
-    } else if (flashMethod !== FlashMethod.APPassthru) {
+    } else if (flashMethod !== FlashMethod.ArduPilotPassthrough) {
         setApPorts([]);
     }
   }, [flashMethod, selectedPort]);
@@ -217,7 +217,7 @@ function FirmwareFlasherPanel({
         const port = await findPortByName(selectedPort);
         if (!port || apScanAbortRef.current) return;
 
-        const service = new ApPassthroughService(port, (msg) => {
+        const service = new ArduPilotPassthroughService(port, (msg) => {
             if (msg.includes("Timeout") && !apScanAbortRef.current) {
                 setError(`Scan Timeout on ${selectedPort}: Ensure FC is powered and connected.`);
             }
@@ -270,10 +270,10 @@ function FirmwareFlasherPanel({
     if (!file) return;
 
     // Check for port requirement
-    // FIX: logic now allows selecting port for appassthru if needed, but appassthru usually needs it passed
-    // the previous bug was that we didn't force port selection for appassthru in Python,
-    // but the UI needs to let the user select it if the method is UART-based or appassthru
-    const needsPort = (flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || flashMethod === FlashMethod.InavPassthrough || metadata?.needsPort);
+    // FIX: logic now allows selecting port for passthrough if needed, but usually needs it passed
+    // the previous bug was that we didn't force port selection for passthrough in Python,
+    // but the UI needs to let the user select it if the method is UART-based or passthrough
+    const needsPort = (flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.ArduPilotPassthrough || flashMethod === FlashMethod.InavPassthrough || metadata?.needsPort);
     
     if (needsPort && !selectedPort) {
       setError('Please select a COM port first.');
@@ -304,12 +304,10 @@ function FirmwareFlasherPanel({
     
     // special case for appassthru that includes serial port info
     let programmer = 'auto'; // default
-    if (flashMethod === FlashMethod.APPassthru) {
-       // preserve legacy behavior for appassthru which might expect 'stm32 appassthru serialX'
-       // actually, the backend refactor now handles 'serialX' via provided_programmer or separate arg?
-       // Let's pass the serial info in the programmer string for now to be safe with the new backend logic
-       // which checks provided_programmer for 'serial'
-       programmer = `appassthru ${serialX.toLowerCase()}`;
+    if (flashMethod === FlashMethod.ArduPilotPassthrough) {
+       // legacy behavior for passthrough which might expect 'stm32 ardupilot_passthrough serialX'
+       // Pass the serial info in the programmer string for safety
+       programmer = `ardupilot_passthrough ${serialX.toLowerCase()}`;
     }
 
     onFlash({
@@ -318,7 +316,7 @@ function FirmwareFlasherPanel({
       device: selectedDevice,
       version: selectedVersion,
       flashMethod: flashMethod,
-      passthroughSerial: (flashMethod === FlashMethod.APPassthru) ? serialX : undefined,
+      passthroughSerial: (flashMethod === FlashMethod.ArduPilotPassthrough) ? serialX : undefined,
       passthroughIdentifier: (flashMethod === FlashMethod.InavPassthrough) ? parseInt(targetUartIndex) : undefined,
       activationBaud: (flashMethod === FlashMethod.InavPassthrough) ? mspPorts.find(p => String(p.index) === String(targetUartIndex))?.baudRate : undefined,
       url: file.url,
@@ -377,7 +375,7 @@ function FirmwareFlasherPanel({
   // Enforce allowed methods for R9 Rx/Tx
   useEffect(() => {
     if (isR9Rx) {
-      if (flashMethod !== FlashMethod.STLink && flashMethod !== FlashMethod.APPassthru) {
+      if (flashMethod !== FlashMethod.STLink && flashMethod !== FlashMethod.ArduPilotPassthrough) {
         setFlashMethod(FlashMethod.STLink);
       }
       
@@ -474,7 +472,7 @@ function FirmwareFlasherPanel({
                             {/* Always show for R9 Tx to confirm method, otherwise only if multiple choices exist */}
                             {(metadata?.raw_flashmethod?.includes(',') || isR9Tx || flashMethod === FlashMethod.InavPassthrough) && (
                             <>
-                                {((showSerialX && flashMethod === FlashMethod.APPassthru) || flashMethod === FlashMethod.InavPassthrough) ? (
+                                {((showSerialX && flashMethod === FlashMethod.ArduPilotPassthrough) || flashMethod === FlashMethod.InavPassthrough) ? (
                                     <>
                                     <div className="form-group span-2">
                                         <label>Flash Method</label>
@@ -493,7 +491,7 @@ function FirmwareFlasherPanel({
                                             if (m === FlashMethod.STLink) label = 'STLink (SWD)';
                                             if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
                                             if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
-                                            if (m === FlashMethod.APPassthru) label = 'AP Passthru';
+                                            if (m === FlashMethod.ArduPilotPassthrough) label = 'ArduPilot Passthrough';
                                             if (m === FlashMethod.InavPassthrough) label = 'INAV Passthrough';
                                             return <option key={m} value={m}>{label}</option>;
                                             })}
@@ -501,7 +499,7 @@ function FirmwareFlasherPanel({
                                         </div>
                                     </div>
                                     
-                                    {flashMethod === FlashMethod.APPassthru && (
+                                    {flashMethod === FlashMethod.ArduPilotPassthrough && (
                                     <div className="form-group span-2">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
@@ -564,13 +562,13 @@ function FirmwareFlasherPanel({
                                                                 .filter((v, i, a) => a.indexOf(v) === i) // unique
                                                                 .filter(m => m !== FlashMethod.InavPassthrough || targetType === TargetType.Receiver) // Only Rx
                                                                 // Filter logic (preserve R9 strictness if desired, but conceptually just listing what's available is usually better)
-                                                                .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.APPassthru || m === FlashMethod.InavPassthrough)
+                                                                .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.ArduPilotPassthrough || m === FlashMethod.InavPassthrough)
                                                                 .map((m: string) => {
                                                                 let label = m;
                                                                 if (m === FlashMethod.DFU) label = 'DFU (USB)';                                                                if (m === FlashMethod.STLink) label = 'STLink (SWD)';
                                                                 if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
                                                                 if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
-                                                                if (m === FlashMethod.APPassthru) label = 'AP Passthru';
+                                                                if (m === FlashMethod.ArduPilotPassthrough) label = 'ArduPilot Passthrough';
                                                                 if (m === FlashMethod.InavPassthrough) label = 'INAV Passthrough';
                                                                 return <option key={m} value={m}>{label}</option>;
                                                                 })}
@@ -582,7 +580,7 @@ function FirmwareFlasherPanel({
                             )}
 
                             {/* COM Port Selection */}
-                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru || flashMethod === FlashMethod.InavPassthrough) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && (!isFrSkyR9 || (isFrSkyR9 && (flashMethod === FlashMethod.APPassthru || flashMethod === FlashMethod.InavPassthrough))) && (
+                            {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.ArduPilotPassthrough || flashMethod === FlashMethod.InavPassthrough) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && (!isFrSkyR9 || (isFrSkyR9 && (flashMethod === FlashMethod.ArduPilotPassthrough || flashMethod === FlashMethod.InavPassthrough))) && (
                             <div className="form-group port-group full-width">
                                 <label>
                                     {flashMethod === FlashMethod.InavPassthrough ? "Flight Controller Port" : "COM Port"}

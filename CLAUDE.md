@@ -29,7 +29,7 @@ web/src/
 │   ├── webSerialApi.ts      # Main orchestration layer (public API)
 │   ├── flasher.ts           # Flashing dispatcher (routes to ESP/STM32)
 │   ├── githubApi.ts         # Firmware/version fetching from GitHub
-│   ├── apPassthru.ts        # ArduPilot passthrough (MAVLink)
+│   ├── ardupilotPassthrough.ts # ArduPilot passthrough (MAVLink)
 │   ├── inavPassthrough.ts   # INAV passthrough (MSP V2)
 │   ├── stm32UartProtocol.ts # STM32 serial bootloader
 │   ├── bufferedSerial.ts    # Buffered serial I/O with timeouts
@@ -46,7 +46,7 @@ web/src/
 
 **Flashing Flow:** User selects firmware → `webSerialApi.ts` coordinates → `flasher.ts` dispatches to appropriate method (esptool-js for ESP32, webdfu for STM32 DFU, stm32UartProtocol for STM32 UART)
 
-**Passthrough Protocols:** Flight controllers (ArduPilot/INAV) can route serial traffic to connected receivers. `apPassthru.ts` uses MAVLink, `inavPassthrough.ts` uses MSP V2.
+**Passthrough Protocols:** Flight controllers (ArduPilot/INAV) can route serial traffic to connected receivers. `ardupilotPassthrough.ts` uses MAVLink, `inavPassthrough.ts` uses MSP V2.
 
 **State Management:** Global state in `App.tsx` via React hooks. `usePersistentState` hook for localStorage-backed preferences.
 
@@ -54,7 +54,7 @@ web/src/
 
 Located in `src/constants.ts`:
 - `TargetType`: rx, tx, txint
-- `FlashMethod`: uart, dfu, esptool, stlink, appassthru, inav_passthrough, elrsbl
+- `FlashMethod`: uart, dfu, esptool, stlink, ardupilot_passthrough, inav_passthrough, elrsbl
 - `LogType`: info, error, warning, progress, success
 
 ### Critical Dependencies

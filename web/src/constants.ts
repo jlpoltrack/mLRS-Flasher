@@ -33,7 +33,7 @@ export const FlashMethod = {
   DFU: 'dfu',
   ESPTool: 'esptool',
   STLink: 'stlink',
-  APPassthru: 'appassthru',
+  ArduPilotPassthrough: 'ardupilot_passthrough',
   InavPassthrough: 'inav_passthrough',
   ELRSBL: 'elrsbl',
 } as const;

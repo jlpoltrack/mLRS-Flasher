@@ -302,10 +302,10 @@ class MavLinkConnection {
 }
 
 // ------------------------------------
-// AP Passthrough Service (Port Scanning)
+// ArduPilot Passthrough Service (Port Scanning)
 // ------------------------------------
 
-export interface ApSerialPort {
+export interface ArduPilotSerialPort {
     index: number;        // 1-8 (SERIAL number)
     name: string;         // "SERIAL2 (MAVLink2, 57600)"
     protocol: number;     // 1=MAVLink1, 2=MAVLink2, 28=Scripting
@@ -333,7 +333,7 @@ const BAUD_LOOKUP: Record<number, number> = {
     1500: 1500000,
 };
 
-export class ApPassthroughService {
+export class ArduPilotPassthroughService {
     private mav: MavLinkConnection;
     private onLog?: (msg: string) => void;
 
@@ -350,7 +350,7 @@ export class ApPassthroughService {
             if (got) await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
             return got;
         } catch (e) {
-            this.onLog?.(`AP connect error: ${e}`);
+            this.onLog?.(`ArduPilot connect error: ${e}`);
             return false;
         }
     }
@@ -363,8 +363,8 @@ export class ApPassthroughService {
         }
     }
 
-    async getMavLinkPorts(): Promise<ApSerialPort[]> {
-        const result: ApSerialPort[] = [];
+    async getMavLinkPorts(): Promise<ArduPilotSerialPort[]> {
+        const result: ArduPilotSerialPort[] = [];
 
         // Scan SERIAL1 through SERIAL8
         for (let i = 1; i <= 8; i++) {
@@ -408,7 +408,7 @@ export class ApPassthroughService {
 // Public API
 // ------------------------------------
 
-export async function initApPassthrough(
+export async function initArduPilotPassthrough(
     port: SerialPort,
     passthroughSerialStr: string, 
     isEsp: boolean,
@@ -427,7 +427,7 @@ export async function initApPassthrough(
     const targetPid = info.usbProductId;
 
     onLog?.("------------------------------------------------------------");
-    onLog?.(`AP Passthru - ${passthroughSerialStr}`);
+    onLog?.(`ArduPilot Passthrough - ${passthroughSerialStr}`);
     onLog?.("------------------------------------------------------------");
 
     // Connect to the port (already verified by autoscan)
