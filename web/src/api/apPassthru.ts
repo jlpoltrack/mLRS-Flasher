@@ -47,6 +47,7 @@ class MavLinkConnection {
     
     private seq = 0;
     private readLoopActive = false;
+    private readLoopPromise: Promise<void> | null = null;
 
     // Event bus for packets
     private packetListeners: ((packet: MavLinkPacket) => void)[] = [];
@@ -88,9 +89,16 @@ class MavLinkConnection {
             if (this.reader) {
                 try {
                     await this.reader.cancel();
-                } catch (e) {
-                    console.warn("Reader cancel warning:", e);
+                } catch {
+                    // Ignore cancel errors
                 }
+            }
+            // Wait for read loop to finish before releasing lock
+            if (this.readLoopPromise) {
+                await this.readLoopPromise;
+                this.readLoopPromise = null;
+            }
+            if (this.reader) {
                 this.reader.releaseLock();
                 this.reader = null;
             }
@@ -98,34 +106,35 @@ class MavLinkConnection {
                 this.writer.releaseLock();
                 this.writer = null;
             }
-            await this.port.close();
-        } catch (e) {
-             console.error("Disconnect error:", e);
+            if (this.port.readable || this.port.writable) {
+                await this.port.close();
+            }
+        } catch {
+            // Ignore disconnect errors (port may already be closed)
         }
     }
 
-    private async startReadLoop() {
+    private startReadLoop() {
         if (this.readLoopActive) return;
         this.readLoopActive = true;
 
         if (!this.reader) return;
 
-        try {
-            while (this.readLoopActive && this.reader) {
-                const { value, done } = await this.reader.read();
-                if (done) break;
-                if (value) {
-                     // this.onLog?.(`[RAW] Read ${value.length} bytes`);
-                     // Feed splitter
-                     this.splitter.write(value);
+        this.readLoopPromise = (async () => {
+            try {
+                while (this.readLoopActive && this.reader) {
+                    const { value, done } = await this.reader.read();
+                    if (done) break;
+                    if (value) {
+                        this.splitter.write(value);
+                    }
                 }
+            } catch {
+                // Ignore errors on close/cancel
+            } finally {
+                this.readLoopActive = false;
             }
-        } catch (e) {
-            // Ignore errors on close/cancel
-            // console.error("Read loop error", e);
-        } finally {
-            this.readLoopActive = false;
-        }
+        })();
     }
 
     // Hook up pipeline
@@ -202,29 +211,32 @@ class MavLinkConnection {
         return false;
     }
     
-    async paramRead(paramId: string): Promise<number | null> {
+    async paramRead(paramId: string): Promise<number> {
         const msg = new common.ParamRequestRead();
         msg.paramIndex = -1;
         msg.targetSystem = this.targetSysId;
         msg.targetComponent = this.targetCompId;
-        msg.paramId = paramId; 
-        
+        msg.paramId = paramId;
+
         await this.send(msg);
-        
-        // Wait response
-        const start = Date.now();
-        while (Date.now() - start < 1500) {
-            const pkt = await this.waitForPacket(22, 500); // PARAM_VALUE
-            if (pkt) {
-                if (pkt.payload instanceof common.ParamValue) {
-                    const val = pkt.payload as common.ParamValue;
-                    if (val.paramId.replace(/\0/g, '') === paramId) {
-                        return val.paramValue;
-                    }
+
+        // Wait up to 1500ms for matching PARAM_VALUE
+        // Loop handles stale/wrong paramId packets that may arrive first
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+
+            const pkt = await this.waitForPacket(22, remaining);
+            if (pkt && pkt.payload instanceof common.ParamValue) {
+                const val = pkt.payload as common.ParamValue;
+                if (val.paramId.replace(/\0/g, '') === paramId) {
+                    return val.paramValue;
                 }
+                // Wrong paramId, keep waiting for the correct one
             }
         }
-        return null;
+        throw new Error(`No response for ${paramId}`);
     }
     
     async paramSet(paramId: string, value: number) {
@@ -290,6 +302,109 @@ class MavLinkConnection {
 }
 
 // ------------------------------------
+// AP Passthrough Service (Port Scanning)
+// ------------------------------------
+
+export interface ApSerialPort {
+    index: number;        // 1-8 (SERIAL number)
+    name: string;         // "SERIAL2 (MAVLink2, 57600)"
+    protocol: number;     // 1=MAVLink1, 2=MAVLink2, 28=Scripting
+    baudRate: number;     // Actual baud rate
+}
+
+const FC_SETTLE_TIME_MS = 500;
+
+// Baud rate lookup table (ArduPilot SERIAL_BAUD values)
+const BAUD_LOOKUP: Record<number, number> = {
+    1: 1200,
+    2: 2400,
+    4: 4800,
+    9: 9600,
+    19: 19200,
+    38: 38400,
+    57: 57600,
+    111: 111100,
+    115: 115200,
+    230: 230400,
+    256: 256000,
+    460: 460800,
+    500: 500000,
+    921: 921600,
+    1500: 1500000,
+};
+
+export class ApPassthroughService {
+    private mav: MavLinkConnection;
+    private onLog?: (msg: string) => void;
+
+    constructor(port: SerialPort, onLog?: (msg: string) => void) {
+        this.mav = new MavLinkConnection(port, onLog);
+        this.onLog = onLog;
+    }
+
+    async connect(): Promise<boolean> {
+        try {
+            await this.mav.connect(57600);
+            this.mav.initPipeline();
+            const got = await this.mav.waitForHeartbeat(5000);
+            if (got) await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
+            return got;
+        } catch (e) {
+            this.onLog?.(`AP connect error: ${e}`);
+            return false;
+        }
+    }
+
+    async disconnect(): Promise<void> {
+        try {
+            await this.mav.disconnect();
+        } catch (e) {
+            // Ignore disconnect errors
+        }
+    }
+
+    async getMavLinkPorts(): Promise<ApSerialPort[]> {
+        const result: ApSerialPort[] = [];
+
+        // Scan SERIAL1 through SERIAL8
+        for (let i = 1; i <= 8; i++) {
+            const protocolParam = `SERIAL${i}_PROTOCOL`;
+            const baudParam = `SERIAL${i}_BAUD`;
+
+            let protocol: number;
+            try {
+                protocol = await this.mav.paramRead(protocolParam);
+            } catch {
+                continue;
+            }
+
+            // Filter to MAVLink-compatible protocols: 1=MAVLink1, 2=MAVLink2, 28=Scripting
+            if (protocol !== 1 && protocol !== 2 && protocol !== 28) continue;
+
+            let baudRate = 57600;
+            try {
+                const baudVal = await this.mav.paramRead(baudParam);
+                baudRate = BAUD_LOOKUP[baudVal] || baudVal * 1000;
+            } catch { /* use default */ }
+
+            let protocolName = 'MAVLink';
+            if (protocol === 1) protocolName = 'MAVLink1';
+            else if (protocol === 2) protocolName = 'MAVLink2';
+            else if (protocol === 28) protocolName = 'Scripting';
+
+            result.push({
+                index: i,
+                name: `SERIAL${i} (${protocolName}, ${baudRate})`,
+                protocol,
+                baudRate,
+            });
+        }
+
+        return result;
+    }
+}
+
+// ------------------------------------
 // Public API
 // ------------------------------------
 
@@ -306,7 +421,7 @@ export async function initApPassthrough(
     if (match) serialIndex = parseInt(match[1]);
     const pProtocolName = `SERIAL${serialIndex}_PROTOCOL`;
 
-    // 1. Identify Target Device Type
+    // For ESP reconnection flow
     const info = port.getInfo();
     const targetVid = info.usbVendorId;
     const targetPid = info.usbProductId;
@@ -314,63 +429,26 @@ export async function initApPassthrough(
     onLog?.("------------------------------------------------------------");
     onLog?.(`AP Passthru - ${passthroughSerialStr}`);
     onLog?.("------------------------------------------------------------");
-    
-    let mav: MavLinkConnection | null = null;
+
+    // Connect to the port (already verified by autoscan)
+    let mav: MavLinkConnection | null = new MavLinkConnection(port, onLog);
     let activePort = port;
+    try {
+        await mav.connect(57600);
+        mav.initPipeline();
 
-    // ---------------------------------------------------------
-    // 1. Establish Active Connection (Scan Mode)
-    // ---------------------------------------------------------
-    
-    // Logic: Identify all candidate ports. Try each one.
-    // If we find a heartbeat, lock it.
-    
-    const allPorts = await (navigator.serial as any).getPorts();
-    const candidates = allPorts.filter((p: any) => {
-         const i = p.getInfo();
-         return i.usbVendorId === targetVid && i.usbProductId === targetPid;
-    });
-
-    if (candidates.length === 0) candidates.push(port); // Fallback
-
-    onLog?.(`Found ${candidates.length} matching port(s). Scanning for heartbeat...`);
-
-    let foundInitial = false;
-    for (let i = 0; i < candidates.length; i++) {
-        const p = candidates[i];
-        
-        onLog?.(`[Candidate ${i+1}/${candidates.length}] Probe Connecting...`);
-        
-        const m = new MavLinkConnection(p, onLog);
-        try {
-            await m.connect(57600);
-            m.initPipeline(); 
-            
-            // Wait up to 5s for heartbeat (User Request)
-            if (await m.waitForHeartbeat(5000)) {
-                onLog?.(`[Candidate ${i+1}] Heartbeat detected! Active Device Found.`);
-                mav = m;
-                activePort = p;
-                foundInitial = true;
-                break;
-            } else {
-                onLog?.(`[Candidate ${i+1}] No heartbeat (5s). Disconnecting...`);
-                await m.disconnect();
-            }
-        } catch (e) {
-            onLog?.(`[Candidate ${i+1}] Error: ${e}`);
-            try { await m.disconnect(); } catch (err) {} 
+        if (!await mav.waitForHeartbeat(5000)) {
+            await mav.disconnect();
+            throw new Error(
+                "Connection failed: No MAVLink heartbeat detected.\n" +
+                "Please ensure the Flight Controller is connected and powered."
+            );
         }
-    }
-
-    if (!foundInitial || !mav) {
-        throw new Error(
-            "Connection failed: No MAVLink heartbeat detected on any candidate port (10s window).\n" +
-            "Please ensure:\n" +
-            "1. The Flight Controller is connected via USB.\n" +
-            "2. You have selected the correct COM port (check Device Manager/System Report).\n" +
-            "3. If using a different port instance (e.g. Composite device), try clicking 'Add Device' again to re-authorize the correct interface."
-        );
+        onLog?.("Heartbeat detected!");
+        await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
+    } catch (e) {
+        try { await mav.disconnect(); } catch { }
+        throw e;
     }
 
     // ---------------------------------------------------------
@@ -381,11 +459,8 @@ export async function initApPassthrough(
     // Perform parameter checks.
     
     const pBaudName = `SERIAL${serialIndex}_BAUD`;
-    // onLog?.(`Reading Link Parameters...`);
     const protocol = await mav.paramRead(pProtocolName);
     const baudVal = await mav.paramRead(pBaudName);
-    
-    if (protocol === null || baudVal === null) throw new Error("Failed to read SERIAL parameters.");
 
     // Strict Mode validation
     if (protocol !== 2 && protocol !== 28) {
@@ -410,6 +485,7 @@ export async function initApPassthrough(
              await mav.disconnect();
              throw new Error(`Failed to reconnect at ${receiverBaud}.`);
         }
+        await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
     }
 
     // ---------------------------------------------------------

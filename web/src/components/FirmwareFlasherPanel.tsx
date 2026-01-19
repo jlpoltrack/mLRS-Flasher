@@ -1,17 +1,16 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useFirmwareLoader, useSerialPorts, useUSBDevices, useDefaultSelection } from '../hooks/useFirmwareLoader';
 import { useStlinkDevices } from '../hooks/useStlinkDevices';
 import { api } from '../api/webSerialApi';
 import { findPortByName } from '../api/hardwareService';
 import { InavPassthroughService, type MspPort } from '../api/inavPassthrough';
+import { ApPassthroughService, type ApSerialPort } from '../api/apPassthru';
 import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
 // last updated: 2026-01-16
-
-const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
 interface FirmwareFlasherPanelProps {
   title: string;
@@ -47,6 +46,11 @@ function FirmwareFlasherPanel({
   const [mspPorts, setMspPorts] = useState<MspPort[]>([]);
   const [isScanningMsp, setIsScanningMsp] = useState(false);
   const [targetUartIndex, setTargetUartIndex] = usePersistentState(`flasher_${targetType}_inavTargetUart`, '');
+
+  const [apPorts, setApPorts] = useState<ApSerialPort[]>([]);
+  const [isScanningAp, setIsScanningAp] = useState(false);
+  const apScanAbortRef = useRef(false);
+  const apServiceRef = useRef<ApPassthroughService | null>(null);
 
   // remove explicit state resets when switching between pages (target types)
   // as we now use targetType-specific keys in localStorage
@@ -132,6 +136,24 @@ function FirmwareFlasherPanel({
     }
   }, [flashMethod, selectedPort]); // scanMspPorts omitted to avoid loop, it is stable enough via useCallback if we added it, but cleaner this way or add it and ensure stability
 
+  // Auto-scan AP ports when method or port changes
+  useEffect(() => {
+    if (flashMethod === FlashMethod.APPassthru && selectedPort) {
+        apScanAbortRef.current = false;
+        const timer = setTimeout(() => scanApPorts(), 100);
+        return () => {
+            clearTimeout(timer);
+            apScanAbortRef.current = true;
+            // Disconnect any in-progress scan
+            if (apServiceRef.current) {
+                apServiceRef.current.disconnect().catch(() => {});
+            }
+        };
+    } else if (flashMethod !== FlashMethod.APPassthru) {
+        setApPorts([]);
+    }
+  }, [flashMethod, selectedPort]);
+
   const scanMspPorts = useCallback(async () => {
     if (!selectedPort) return;
     
@@ -182,6 +204,66 @@ function FirmwareFlasherPanel({
            }
       }
   }, [mspPorts, targetUartIndex, setTargetUartIndex]);
+
+  const scanApPorts = useCallback(async () => {
+    if (!selectedPort) return;
+    if (isScanningAp) return;
+
+    setIsScanningAp(true);
+    setApPorts([]);
+    setError(null);
+
+    try {
+        const port = await findPortByName(selectedPort);
+        if (!port || apScanAbortRef.current) return;
+
+        const service = new ApPassthroughService(port, (msg) => {
+            if (msg.includes("Timeout") && !apScanAbortRef.current) {
+                setError(`Scan Timeout on ${selectedPort}: Ensure FC is powered and connected.`);
+            }
+        });
+        apServiceRef.current = service;
+
+        try {
+            const connected = await service.connect();
+            if (apScanAbortRef.current) return;
+
+            if (connected) {
+                const ports = await service.getMavLinkPorts();
+                if (apScanAbortRef.current) return;
+
+                setApPorts(ports);
+                if (ports.length === 0) {
+                    setError(`No MAVLink ports found on FC. Check SERIAL_PROTOCOL settings.`);
+                }
+            } else {
+                setError(`No ArduPilot heartbeat on ${selectedPort}. Ensure FC is connected and not in use.`);
+            }
+        } catch (e: any) {
+            if (!apScanAbortRef.current) console.error("AP Scan failed:", e);
+        } finally {
+            apServiceRef.current = null;
+            try {
+                await service.disconnect();
+                await new Promise(r => setTimeout(r, 200)); // Let port fully release
+            } catch { /* ignore close errors */ }
+        }
+    } catch (e: any) {
+        console.error("Port lookup failed:", e);
+    } finally {
+        if (!apScanAbortRef.current) setIsScanningAp(false);
+    }
+  }, [selectedPort, isScanningAp]);
+
+  // Auto-select AP port when list updates
+  useEffect(() => {
+      if (apPorts.length > 0) {
+           const currentValid = apPorts.find(p => `SERIAL${p.index}` === serialX);
+           if (!currentValid) {
+               setSerialX(`SERIAL${apPorts[0].index}`);
+           }
+      }
+  }, [apPorts, serialX, setSerialX]);
 
   const handleFlash = useCallback(() => {
     const file = firmwareFiles.find(f => f.filename === selectedFile);
@@ -422,14 +504,20 @@ function FirmwareFlasherPanel({
                                     <div className="form-group span-2">
                                         <label>Passthrough Serial</label>
                                         <div className="select-wrapper">
-                                        <select 
-                                            value={serialX} 
+                                        <select
+                                            value={serialX}
                                             onChange={(e) => setSerialX(e.target.value)}
-                                            disabled={isFlashing}
+                                            disabled={isFlashing || isScanningAp || apPorts.length === 0}
                                         >
-                                            {SERIAL_PORTS.map(p => (
-                                            <option key={p} value={p}>{p}</option>
-                                            ))}
+                                            {isScanningAp ? (
+                                                <option>Scanning FC ports...</option>
+                                            ) : apPorts.length > 0 ? (
+                                                apPorts.map(p => (
+                                                    <option key={p.index} value={`SERIAL${p.index}`}>{p.name}</option>
+                                                ))
+                                            ) : (
+                                                <option>No MAVLink ports found</option>
+                                            )}
                                         </select>
                                         </div>
                                     </div>
