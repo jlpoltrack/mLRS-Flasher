@@ -49,6 +49,7 @@ function FirmwareFlasherPanel({
 
   const [apPorts, setApPorts] = useState<ArduPilotSerialPort[]>([]);
   const [isScanningAp, setIsScanningAp] = useState(false);
+  const [scanProgressLabel, setScanProgressLabel] = useState('Scanning FC ports...');
   const apScanAbortRef = useRef(false);
   const apServiceRef = useRef<ArduPilotPassthroughService | null>(null);
 
@@ -229,7 +230,9 @@ function FirmwareFlasherPanel({
             if (apScanAbortRef.current) return;
 
             if (connected) {
-                const ports = await service.getMavLinkPorts();
+                const ports = await service.getMavLinkPorts((msg) => {
+                    if (!apScanAbortRef.current) setScanProgressLabel(msg);
+                });
                 if (apScanAbortRef.current) return;
 
                 setApPorts(ports);
@@ -251,7 +254,10 @@ function FirmwareFlasherPanel({
     } catch (e: any) {
         console.error("Port lookup failed:", e);
     } finally {
-        if (!apScanAbortRef.current) setIsScanningAp(false);
+        if (!apScanAbortRef.current) {
+            setIsScanningAp(false);
+            setScanProgressLabel('Scanning FC ports...');
+        }
     }
   }, [selectedPort, isScanningAp]);
 
@@ -509,7 +515,7 @@ function FirmwareFlasherPanel({
                                             disabled={isFlashing || isScanningAp || apPorts.length === 0}
                                         >
                                             {isScanningAp ? (
-                                                <option>Scanning FC ports...</option>
+                                                <option>{scanProgressLabel}</option>
                                             ) : apPorts.length > 0 ? (
                                                 apPorts.map(p => (
                                                     <option key={p.index} value={`SERIAL${p.index}`}>{p.name}</option>
