@@ -32,9 +32,17 @@ function App() {
     setLogs(prev => [...prev.slice(-200), { ...entry, timestamp }]); // keep last 200 entries
   }, []);
 
+  // clear all flasher localStorage keys on page load
+  // selections only persist within a session, not across reloads
+  const clearFlasherSelections = () => {
+    const keysToRemove = Object.keys(localStorage).filter(key => key.startsWith('flasher_'));
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+  };
+
   // load initial data on mount
   useEffect(() => {
     console.log(`%cmLRS Flasher v${__APP_VERSION__}`, 'color: #3b82f6; font-weight: bold; font-size: 1.2em;');
+    clearFlasherSelections();
     
     async function loadInitialData() {
       if (hasLoaded.current) return;
