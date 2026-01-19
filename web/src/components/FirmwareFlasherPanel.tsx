@@ -10,7 +10,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-01-16
+// last updated: 2026-01-19
 
 interface FirmwareFlasherPanelProps {
   title: string;
@@ -320,6 +320,7 @@ function FirmwareFlasherPanel({
       flashMethod: flashMethod,
       passthroughSerial: (flashMethod === FlashMethod.APPassthru) ? serialX : undefined,
       passthroughIdentifier: (flashMethod === FlashMethod.InavPassthrough) ? parseInt(targetUartIndex) : undefined,
+      activationBaud: (flashMethod === FlashMethod.InavPassthrough) ? mspPorts.find(p => String(p.index) === String(targetUartIndex))?.baudRate : undefined,
       url: file.url,
       filename: file.filename,
       port: (flashMethod === FlashMethod.STLink) ? selectedStlink : (selectedPort || undefined),
@@ -327,7 +328,7 @@ function FirmwareFlasherPanel({
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, targetUartIndex, setError, onFlash, targetType, metadata]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, targetUartIndex, mspPorts, setError, onFlash, targetType, metadata]);
 
   const handleFlashWirelessBridge = useCallback(async () => {
     if (!metadata?.wireless?.chipset) {

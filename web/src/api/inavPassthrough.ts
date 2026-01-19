@@ -52,6 +52,10 @@ export class InavPassthroughService {
         await this.serial.close();
     }
 
+    async reconnect(baudRate: number) {
+        await this.serial.connect({ baudRate });
+    }
+
     async getMspPorts(): Promise<MspPort[]> {
         try {
             const payload = await this.msp.sendCommand(MSP2_COMMON_SERIAL_CONFIG);
@@ -95,19 +99,26 @@ export class InavPassthroughService {
 
     async enterPassthrough(uartId: number, baud: number, sendReboot: boolean = false) {
         this.log(`Activating passthrough on UART ${uartId + 1} at ${baud} baud...`);
-        
+
         // Ensure we are in CLI mode by sending newlines and hash
         await this.serial.write(new TextEncoder().encode('\n\n#\n'));
         await new Promise(r => setTimeout(r, 500));
 
         const cmd = `serialpassthrough ${uartId} ${baud}\n`;
+        this.log(`Sending command: ${cmd.trim()}`);
         await this.serial.write(new TextEncoder().encode(cmd));
-        
-        // wait for FC to switch - increased to ensure stabilization
+
+        // Wait for FC to enter passthrough mode
         await new Promise(r => setTimeout(r, 500));
 
+        // For ESP (no reboot): reconnect at passthrough baud since esptool will use this speed
+        // For STM32 (with reboot): caller already connected at correct baud before calling this
+        if (!sendReboot) {
+            await this.reconnect(baud);
+            await new Promise(r => setTimeout(r, 500));
+        }
+
         this.log("Passthrough active.");
-        // wait another bit to capture any trailing echoes
         await new Promise(r => setTimeout(r, 500));
 
         if (sendReboot) {
@@ -122,8 +133,8 @@ export class InavPassthroughService {
                 // preventing it from sending an ACK.
                 this.log(`Rx reboot command sent (no ACK received, proceeding). Error: ${e.message}`);
             }
-            
-            // wait for reboot to complete
+
+            // Wait for reboot to complete
             this.log(`Waiting ${REBOOT_WAIT_MS}ms for receiver to reboot...`);
             await new Promise(r => setTimeout(r, REBOOT_WAIT_MS));
         }

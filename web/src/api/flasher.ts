@@ -1,4 +1,4 @@
-// 2026-01-17
+// 2026-01-19
 import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
@@ -31,6 +31,7 @@ export interface FlasherOptions {
   flashMethod?: string;
   passthroughSerial?: string;
   passthroughIdentifier?: number; // UART Index for INAV Passthrough
+  activationBaud?: number; // Baud rate used for activation/reboot on STM32
   isWirelessBridge?: boolean; // external tx wireless bridge mode
 }
 
@@ -75,9 +76,18 @@ export async function flash(
                  throw new Error("Target UART not specified for INAV Passthrough");
              }
              const svc = new InavPassthroughService(port as SerialPort, onLog);
-             await svc.connect();
-             // For STM32, we send the special reboot command to force bootloader
-             await svc.enterPassthrough(options.passthroughIdentifier, 115200, true);
+
+             // Use detected baud rate for passthrough activation, default to 115200
+             const activationBaud = options.activationBaud || 115200;
+             onLog?.(`INAV Passthrough: Using activation baud ${activationBaud}`);
+
+             // Connect at activation baud - INAV mirrors host baud to the bridged UART
+             await svc.reconnect(activationBaud);
+
+             // Send passthrough command and reboot (enterPassthrough closes port when done)
+             await svc.enterPassthrough(options.passthroughIdentifier, activationBaud, true);
+
+             // STM32 bootloader uses 115200 - INAV will mirror when we reopen at this baud
              options.baud = 115200;
         }
         return flashSTM32UART(port as SerialPort, firmwareData, options);
@@ -809,6 +819,20 @@ async function flashSTM32UART(
 ): Promise<void> {
   const sm = new FlasherStateMachine(options.onProgress, options.onLog);
   sm.transition('CONNECTING', "Starting STM32 UART flash...");
+
+  // Ensure port is closed (so stm32 flasher can open it with correct parity)
+  // Rapid state changes and parity switches can cause browser/driver crashes.
+  if (port.readable || port.writable) {
+      sm.log("Port appears open, attempting to close to stabilize...");
+      try {
+          await port.close();
+          sm.log("Port closed for stabilization.");
+      } catch (e) {
+          sm.log(`Warning: Port closure during stabilization failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      // Give the OS/browser extra time to fully release the port and settle
+      await new Promise(r => setTimeout(r, 1000));
+  }
 
   let memoryBlocks: { address: number, data: Uint8Array }[] = [];
 

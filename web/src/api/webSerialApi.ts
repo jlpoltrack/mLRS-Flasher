@@ -1,5 +1,5 @@
 // web serial api - orchestration layer for flashing and downloads
-// 2026-01-13
+// 2026-01-19
 
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
@@ -121,7 +121,8 @@ export const api = {
     target?: string,
     reset?: string,
     url?: string,
-    erase?: string
+    erase?: string,
+    activationBaud?: number
   }): Promise<void> => { 
     const { type, device, filename } = options;
     const metadata = await githubApi.getMetadata({ type, device, filename });
@@ -150,6 +151,7 @@ export const api = {
       flashMethod: options.flashMethod,
       passthroughSerial: options.passthroughSerial,
       passthroughIdentifier: options.passthroughIdentifier,
+      activationBaud: options.activationBaud,
       isWirelessBridge: !!metadata.isWirelessBridgeFirmware
     };
 
