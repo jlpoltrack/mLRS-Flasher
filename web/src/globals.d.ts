@@ -1,7 +1,5 @@
 // global type declarations
 
-declare const __APP_VERSION__: string;
-
 // Extend Navigator interface to include serial and usb
 interface Navigator {
   serial: Serial;
