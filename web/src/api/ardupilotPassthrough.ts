@@ -194,6 +194,9 @@ class MavLinkConnection {
         const startTime = Date.now();
 
         while (Date.now() - startTime < timeoutMs) {
+            // Exit early if connection is dead
+            if (!this.readLoopActive) return null;
+
             // Check queue for matching packet
             for (let i = 0; i < this.packetQueue.length; i++) {
                 const packet = this.packetQueue[i];
@@ -497,18 +500,25 @@ export async function initArduPilotPassthrough(
 
                  await mav.disconnect();
 
-                 onLog?.("Waiting for device disconnect...");
-                 // Wait for physical unplug
-                 while (true) {
+                 onLog?.("Please disconnect the flight controller within 60 seconds...");
+                 // Wait for physical unplug (with 60s timeout)
+                 const disconnectStart = Date.now();
+                 let disconnected = false;
+                 while (Date.now() - disconnectStart < 60000) {
                      try {
                          await activePort.open({ baudRate: 57600 });
                          await activePort.close();
                          // If open worked, device is still here.
                          await new Promise(r => setTimeout(r, 500));
                      } catch (e) {
-                         onLog?.("Device disconnected.");
+                         onLog?.("Flight controller disconnected.");
+                         disconnected = true;
                          break;
                      }
+                 }
+
+                 if (!disconnected) {
+                     throw new Error("Timed out waiting for flight controller disconnect.");
                  }
 
                  onLog?.("Scanning for Reconnection (Active)...");
@@ -539,13 +549,15 @@ export async function initArduPilotPassthrough(
                                  break;
                              }
                              await m.disconnect();
-                         } catch(e) {}
+                         } catch(e) {
+                            await m.disconnect().catch(() => {});
+                        }
                      }
                      if (reconnectedMav) break;
                      await new Promise(r => setTimeout(r, 500));
                  }
                  
-                 if (!reconnectedMav) throw new Error("Timed out waiting for device reconnection.");
+                 if (!reconnectedMav) throw new Error("Timed out waiting for flight controller reconnection.");
                  
                  mav = reconnectedMav;
                  activePort = reconnectedPort;
