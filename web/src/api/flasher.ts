@@ -292,10 +292,21 @@ async function flashESP(
 
         if (cleanChip.includes('esp32c3')) {
             bootloaderPath = resolveAssetPath('/assets/esp32c3/bootloader.bin');
-            partitionsPath = resolveAssetPath('/assets/esp32c3/partitions.bin');
             bootAppPath = resolveAssetPath('/assets/esp32c3/boot_app0.bin');
             bootloaderOffset = 0x0000;
             flashSize = '4MB';
+
+            // Use no-OTA partition for ESP32C3 bridges (both external and internal Tx)
+            // Receivers continue to use the standard partitions.bin
+            const isBridge = options.isWirelessBridge ||
+                             (options.filename && options.filename.toLowerCase().includes('bridge'));
+
+            if (isBridge) {
+                partitionsPath = resolveAssetPath('/assets/esp32c3/partitions_noota.bin');
+                sm.log("Using no-OTA partition table for ESP32C3 bridge");
+            } else {
+                partitionsPath = resolveAssetPath('/assets/esp32c3/partitions.bin');
+            }
         } else if (cleanChip.includes('esp32s3')) {
             bootloaderPath = resolveAssetPath('/assets/esp32s3/bootloader.bin');
             partitionsPath = resolveAssetPath('/assets/esp32s3/partitions.bin');
