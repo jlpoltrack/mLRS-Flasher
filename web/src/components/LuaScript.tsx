@@ -8,8 +8,14 @@ interface LuaScriptProps {
 }
 
 function LuaScript({ versions: _versions }: LuaScriptProps) {
-  const [files, setFiles] = useState<FirmwareFile[]>([]);
-  const [selectedFile, setSelectedFile] = useState('');
+  // edgetx/opentx lua files (root lua folder)
+  const [edgeTxFiles, setEdgeTxFiles] = useState<FirmwareFile[]>([]);
+  const [selectedEdgeTxFile, setSelectedEdgeTxFile] = useState('');
+  
+  // ethos lua files (lua/ethos folder)
+  const [ethosFiles, setEthosFiles] = useState<FirmwareFile[]>([]);
+  const [selectedEthosFile, setSelectedEthosFile] = useState('');
+  
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,19 +23,28 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
   useEffect(() => {
     const fetchFiles = async () => {
       try {
-        const res = await api.listFirmware({ 
+        // fetch edgetx/opentx lua files (root lua folder)
+        const edgeTxRes = await api.listFirmware({ 
           type: 'lua', 
-          version: 'main' 
+          version: 'main',
+          luaFolder: 'root'
         });
-        
-        const fileList = res.files || [];
-        setFiles(fileList);
-        
-        // default to first file or empty
-        if (fileList.length > 0) {
-          setSelectedFile(fileList[0].filename);
-        } else {
-          setSelectedFile('');
+        const edgeTxList = edgeTxRes.files || [];
+        setEdgeTxFiles(edgeTxList);
+        if (edgeTxList.length > 0) {
+          setSelectedEdgeTxFile('all');
+        }
+
+        // fetch ethos lua files
+        const ethosRes = await api.listFirmware({ 
+          type: 'lua', 
+          version: 'main',
+          luaFolder: 'ethos'
+        });
+        const ethosList = ethosRes.files || [];
+        setEthosFiles(ethosList);
+        if (ethosList.length > 0) {
+          setSelectedEthosFile('all');
         }
       } catch (err) {
         console.error('Failed to fetch Lua files:', err);
@@ -39,15 +54,47 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
     fetchFiles();
   }, []);
 
-  const handleDownload = async () => {
+  const handleDownload = async (folder: 'root' | 'ethos') => {
+    const files = folder === 'root' ? edgeTxFiles : ethosFiles;
+    const selectedFile = folder === 'root' ? selectedEdgeTxFile : selectedEthosFile;
+    
     try {
       setIsDownloading(true);
       setError(null);
       
-      await api.downloadLua({
-        version: 'main',
-        filename: selectedFile === 'all' ? null : selectedFile
-      });
+      // determine which files to download
+      const filesToDownload = selectedFile === 'all' 
+        ? files 
+        : files.filter(f => f.filename === selectedFile);
+      
+      if (filesToDownload.length === 0) {
+        throw new Error("No Lua files found to download");
+      }
+
+      for (const file of filesToDownload) {
+        const response = await fetch(file.url);
+        const initialBlob = await response.blob();
+        
+        const blob = new Blob([initialBlob], { type: 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        
+        // trigger browser download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.filename;
+        a.target = '_blank';
+        a.style.position = 'absolute';
+        a.style.left = '-9999px';
+        
+        document.body.appendChild(a);
+        a.click();
+        
+        // delay cleanup to ensure browser captures the download
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }, 1000);
+      }
       
       setIsDownloading(false);
     } catch (err: any) {
@@ -76,48 +123,81 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
       )}
       
       <div className="form-grid">
+        {/* EdgeTX/OpenTX dropdown */}
         <div className="form-group span-2 port-group">
-          <label>Lua Script (from Main branch)</label>
+          <label>EdgeTX / OpenTX</label>
           <div className="port-row">
             <div className="select-wrapper">
               <select 
-                value={selectedFile} 
-                onChange={(e) => setSelectedFile(e.target.value)}
-                disabled={isDownloading || files.length === 0}
+                value={selectedEdgeTxFile} 
+                onChange={(e) => setSelectedEdgeTxFile(e.target.value)}
+                disabled={isDownloading || edgeTxFiles.length === 0}
               >
-                {files.length > 0 && (
-                  <option value="all">All Scripts</option>
+                {edgeTxFiles.length > 0 && (
+                  <option value="all">All Files</option>
                 )}
-                {files.map(f => (
+                {edgeTxFiles.map(f => (
                   <option key={f.filename} value={f.filename}>{f.filename}</option>
                 ))}
               </select>
             </div>
             
-            <div title={isDownloading ? 'Download in progress' : files.length === 0 ? 'Loading files...' : !selectedFile ? 'Select a script first' : undefined}>
+            <div title={isDownloading ? 'Download in progress' : edgeTxFiles.length === 0 ? 'Loading files...' : undefined}>
                 <button 
                 className="btn-primary"
-                onClick={handleDownload}
-                disabled={isDownloading || files.length === 0}
-                aria-label="Download Lua scripts"
+                onClick={() => handleDownload('root')}
+                disabled={isDownloading || edgeTxFiles.length === 0}
+                aria-label="Download EdgeTX/OpenTX Lua scripts"
                 >
-                {isDownloading ? 'Downloading...' : selectedFile === 'all' || !selectedFile ? 'Download All' : 'Download'}
+                {isDownloading ? 'Downloading...' : selectedEdgeTxFile === 'all' ? 'Download All' : 'Download'}
                 </button>
             </div>
+          </div>
+        </div>
 
-            {isDownloading && (
-              <button 
-                className="btn-secondary btn-cancel"
-                onClick={() => api.cancelPython()}
+        {/* Ethos dropdown */}
+        <div className="form-group span-2 port-group">
+          <label>Ethos</label>
+          <div className="port-row">
+            <div className="select-wrapper">
+              <select 
+                value={selectedEthosFile} 
+                onChange={(e) => setSelectedEthosFile(e.target.value)}
+                disabled={isDownloading || ethosFiles.length === 0}
               >
-                Cancel
-              </button>
-            )}
+                {ethosFiles.length > 0 && (
+                  <option value="all">All Files</option>
+                )}
+                {ethosFiles.map(f => (
+                  <option key={f.filename} value={f.filename}>{f.filename}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div title={isDownloading ? 'Download in progress' : ethosFiles.length === 0 ? 'Loading files...' : undefined}>
+                <button 
+                className="btn-primary"
+                onClick={() => handleDownload('ethos')}
+                disabled={isDownloading || ethosFiles.length === 0}
+                aria-label="Download Ethos Lua scripts"
+                >
+                {isDownloading ? 'Downloading...' : selectedEthosFile === 'all' ? 'Download All' : 'Download'}
+                </button>
+            </div>
           </div>
         </div>
       </div>
 
-
+      {isDownloading && (
+        <div style={{ marginTop: '12px' }}>
+          <button 
+            className="btn-secondary btn-cancel"
+            onClick={() => api.cancelPython()}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       <div className="description-box">
         <div className="flash-card-header">
@@ -132,6 +212,7 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
             After downloading, copy the scripts to your radio's SD card:
             <ul>
               <li style={{ marginTop: '8px' }}><strong>EdgeTX/OpenTX:</strong> Copy to <code>/SCRIPTS/TOOLS/</code></li>
+              <li style={{ marginTop: '8px' }}><strong>Ethos:</strong> Copy to <code>/scripts/mLRS/</code></li>
             </ul>
           </div>
         </div>
