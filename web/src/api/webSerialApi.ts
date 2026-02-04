@@ -26,7 +26,7 @@ export const api = {
     return { devices };
   },
   
-  listFirmware: async (options: { type: string, device?: string, version: string }) => {
+  listFirmware: async (options: { type: string, device?: string, version: string, luaFolder?: string }) => {
     return githubApi.listFirmware(options);
   },
   

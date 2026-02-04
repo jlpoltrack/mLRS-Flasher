@@ -171,7 +171,7 @@ export const githubApi = {
     }
   },
 
-  listFirmware: async (options: { type: string, device?: string, version: string }): Promise<{ files: FirmwareFile[] }> => {
+  listFirmware: async (options: { type: string, device?: string, version: string, luaFolder?: string }): Promise<{ files: FirmwareFile[] }> => {
     const cacheKey = `firmware-${options.version}`;
     let tree: GitHubTreeItem[] = [];
 
@@ -206,7 +206,16 @@ export const githubApi = {
           const path = item.path;
 
           if (options.type === 'lua') {
-            return path.includes('lua/') && path.endsWith('.lua');
+            if (options.luaFolder === 'ethos') {
+              // all files in lua/Ethos/ except README
+              const filename = path.split('/').pop() || '';
+              if (filename.toLowerCase().startsWith('readme')) return false;
+              return path.includes('lua/Ethos/');
+            } else {
+              // only .lua files directly in lua/ (not in subfolders)
+              if (!path.endsWith('.lua')) return false;
+              return path.startsWith('lua/') && !path.includes('lua/Ethos/');
+            }
           }
 
           // Filter by firmware directory
