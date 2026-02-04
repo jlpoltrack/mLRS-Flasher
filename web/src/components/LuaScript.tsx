@@ -209,10 +209,10 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
             These scripts allow you to configure mLRS parameters directly from your radio's interface.
           </div>
           <div>
-            After downloading, copy the scripts to your radio's SD card:
+            After downloading, copy the files to your radio's SD card:
             <ul>
-              <li style={{ marginTop: '8px' }}><strong>EdgeTX/OpenTX:</strong> Copy to <code>/SCRIPTS/TOOLS/</code></li>
-              <li style={{ marginTop: '8px' }}><strong>Ethos:</strong> Copy to <code>/scripts/mLRS/</code></li>
+              <li style={{ marginTop: '8px' }}><strong>EdgeTX/OpenTX:</strong> Copy the selected file to <code>/SCRIPTS/TOOLS/</code></li>
+              <li style={{ marginTop: '8px' }}><strong>Ethos:</strong> Copy all files to <code>/scripts/mLRS/</code></li>
             </ul>
           </div>
         </div>

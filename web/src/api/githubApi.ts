@@ -207,7 +207,9 @@ export const githubApi = {
 
           if (options.type === 'lua') {
             if (options.luaFolder === 'ethos') {
-              // all files in lua/Ethos/ (not just .lua)
+              // all files in lua/Ethos/ except README
+              const filename = path.split('/').pop() || '';
+              if (filename.toLowerCase().startsWith('readme')) return false;
               return path.includes('lua/Ethos/');
             } else {
               // only .lua files directly in lua/ (not in subfolders)
