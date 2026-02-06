@@ -32,7 +32,7 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
         const edgeTxList = edgeTxRes.files || [];
         setEdgeTxFiles(edgeTxList);
         if (edgeTxList.length > 0) {
-          setSelectedEdgeTxFile('all');
+          setSelectedEdgeTxFile(edgeTxList[edgeTxList.length - 1].filename);
         }
 
         // fetch ethos lua files
@@ -133,10 +133,8 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
                 onChange={(e) => setSelectedEdgeTxFile(e.target.value)}
                 disabled={isDownloading || edgeTxFiles.length === 0}
               >
-                {edgeTxFiles.length > 0 && (
-                  <option value="all">All Files</option>
-                )}
-                {edgeTxFiles.map(f => (
+
+                {edgeTxFiles.slice().reverse().map(f => (
                   <option key={f.filename} value={f.filename}>{f.filename}</option>
                 ))}
               </select>
@@ -147,9 +145,9 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
                 className="btn-primary"
                 onClick={() => handleDownload('root')}
                 disabled={isDownloading || edgeTxFiles.length === 0}
-                aria-label="Download EdgeTX/OpenTX Lua scripts"
+                aria-label="Download EdgeTX/OpenTX Lua script"
                 >
-                {isDownloading ? 'Downloading...' : selectedEdgeTxFile === 'all' ? 'Download All' : 'Download'}
+                {isDownloading ? 'Downloading...' : 'Download'}
                 </button>
             </div>
           </div>
@@ -211,7 +209,13 @@ function LuaScript({ versions: _versions }: LuaScriptProps) {
           <div>
             After downloading, copy the files to your radio's SD card:
             <ul>
-              <li style={{ marginTop: '8px' }}><strong>EdgeTX/OpenTX:</strong> Copy the selected file to <code>/SCRIPTS/TOOLS/</code></li>
+              <li style={{ marginTop: '8px' }}>
+                <strong>EdgeTX/OpenTX:</strong> Copy <strong>only ONE</strong> Lua file to <code>/SCRIPTS/TOOLS/</code>.
+                <br />
+                <span style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+                  Select the script matching your radio type — mLRS.lua for color screen radios, mLRS-bw.lua for black and white screen radios.
+                </span>
+              </li>
               <li style={{ marginTop: '8px' }}><strong>Ethos:</strong> Copy all files to <code>/scripts/mLRS/</code></li>
             </ul>
           </div>
