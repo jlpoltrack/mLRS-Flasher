@@ -1,4 +1,4 @@
-/* panel component styles - 2026-01-16 */
+/* panel component styles - 2026-02-09 */
 .panel {
   max-width: 1200px;
   margin: 0 auto;
@@ -394,4 +394,31 @@
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(37, 99, 235, 0.4);
   filter: brightness(110%);
+}
+
+/* local file upload */
+.local-file-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.local-file-input input[type="file"] {
+  display: none;
+}
+
+.local-file-input .file-select-btn {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-file-input .file-size {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
 }

@@ -1,5 +1,5 @@
 // web serial api - orchestration layer for flashing and downloads
-// 2026-01-13
+// 2026-02-09
 
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
