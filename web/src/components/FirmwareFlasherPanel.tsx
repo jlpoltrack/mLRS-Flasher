@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-02-09
+// last updated: 2026-02-10
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -50,6 +50,7 @@ function FirmwareFlasherPanel({
   const [localBridgeFile, setLocalBridgeFile] = useState<File | null>(null);
   const [localBridgeFileData, setLocalBridgeFileData] = useState<ArrayBuffer | null>(null);
   const [localBridgeChipset, setLocalBridgeChipset] = useState<string>('esp8266');
+  const [localChipset, setLocalChipset] = useState<string>('esp32');
 
   // clear local file state when toggle is turned off
   useEffect(() => {
@@ -59,6 +60,7 @@ function FirmwareFlasherPanel({
       setLocalBridgeFile(null);
       setLocalBridgeFileData(null);
       setLocalBridgeChipset('esp8266');
+      setLocalChipset('esp32');
     }
   }, [useLocalFile]);
 
@@ -195,8 +197,10 @@ function FirmwareFlasherPanel({
       usbDeviceName: (flashMethod === FlashMethod.DFU) ? selectedUSBDevice : (flashMethod === FlashMethod.STLink ? (selectedStlink?.productName || 'ST-Link') : undefined),
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
+      // pass explicit chipset in local file mode so orchestration layer uses correct assets
+      chipset: useLocalFile ? localChipset : undefined,
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData, localChipset]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, isBridge = false) => {
     const file = e.target.files?.[0];
@@ -311,8 +315,8 @@ function FirmwareFlasherPanel({
   // available flash methods for local file mode (target-specific)
   const localFlashMethods = useMemo(() => {
     if (targetType === TargetType.TxInternal) {
-      // tx internal only supports uart
-      return [{ value: FlashMethod.UART, label: 'SystemBoot (UART)' }];
+      // tx internal modules are all esp-based
+      return [{ value: FlashMethod.ESPTool, label: 'ESPTool (UART)' }];
     }
     const methods: { value: string; label: string }[] = [
       { value: FlashMethod.UART, label: 'SystemBoot (UART)' },
@@ -553,7 +557,22 @@ function FirmwareFlasherPanel({
   // --- local file mode ui ---
   const renderLocalFileUI = () => (
     <div className="form-grid">
-      {/* row 1: flash method (if multiple) + local file picker */}
+      {/* row 1: mcu selector (tx internal) + flash method (if multiple) + local file picker */}
+      {targetType === TargetType.TxInternal && (
+        <div className="form-group span-1">
+          <label>Main Module</label>
+          <div className="select-wrapper">
+            <select
+              value={localChipset}
+              onChange={(e) => setLocalChipset(e.target.value)}
+              disabled={isFlashing}
+            >
+              <option value="esp32">ESP32</option>
+              <option value="esp32s3">ESP32-S3</option>
+            </select>
+          </div>
+        </div>
+      )}
       {showFlashMethodSelector && (
         <div className="form-group span-1">
           <label>Flash Method</label>
@@ -570,8 +589,8 @@ function FirmwareFlasherPanel({
           </div>
         </div>
       )}
-      <div className={`form-group ${showFlashMethodSelector ? 'span-3' : 'full-width'}`}>
-        {showFlashMethodSelector && <label>&nbsp;</label>}
+      <div className={`form-group ${(showFlashMethodSelector || targetType === TargetType.TxInternal) ? 'span-3' : 'full-width'}`}>
+        {(showFlashMethodSelector || targetType === TargetType.TxInternal) && <label>&nbsp;</label>}
         <div className="local-file-input">
           <input
             type="file"

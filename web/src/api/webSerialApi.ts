@@ -1,5 +1,5 @@
 // web serial api - orchestration layer for flashing and downloads
-// 2026-02-09
+// 2026-02-10
 
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
@@ -120,7 +120,8 @@ export const api = {
     target?: string,
     reset?: string,
     url?: string,
-    erase?: string
+    erase?: string,
+    chipset?: string
   }): Promise<void> => { 
     const { type, device, filename } = options;
 
@@ -129,7 +130,12 @@ export const api = {
     let chipset: string;
     let metadata: any = null;
     if (options.firmwareData) {
-      chipset = options.flashMethod === 'esptool' ? 'esp32' : 'stm32';
+      // use explicit chipset if provided (e.g. local file mode with mcu selector)
+      if (options.chipset) {
+        chipset = options.chipset;
+      } else {
+        chipset = options.flashMethod === 'esptool' ? 'esp32' : 'stm32';
+      }
     } else {
       metadata = await githubApi.getMetadata({ type, device, filename });
       if (!metadata) {
