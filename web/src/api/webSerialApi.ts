@@ -123,14 +123,22 @@ export const api = {
     erase?: string
   }): Promise<void> => { 
     const { type, device, filename } = options;
-    const metadata = await githubApi.getMetadata({ type, device, filename });
 
-    if (!metadata) {
-      throw new Error(`Device not found in database: ${device}`);
+    // in local file mode (firmwareData provided), infer chipset from flash method
+    // instead of fetching metadata for a possibly stale device selection
+    let chipset: string;
+    let metadata: any = null;
+    if (options.firmwareData) {
+      chipset = options.flashMethod === 'esptool' ? 'esp32' : 'stm32';
+    } else {
+      metadata = await githubApi.getMetadata({ type, device, filename });
+      if (!metadata) {
+        throw new Error(`Device not found in database: ${device}`);
+      }
+      chipset = (metadata.chipset as string) || 'stm32';
     }
 
-    const chipset = (metadata.chipset as string) || 'stm32';
-    const flashmethod = options.flashMethod || (metadata.raw_flashmethod as string) || '';
+    const flashmethod = options.flashMethod || (metadata?.raw_flashmethod as string) || '';
     
     const flasherOptions: FlasherOptions = {
       chipset,
@@ -144,7 +152,7 @@ export const api = {
       filename: options.filename,
       reset: options.reset,
       baud: options.baudrate,
-      erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase),
+      erase: options.erase || (metadata?.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata?.erase),
       device: options.device,
       flashMethod: options.flashMethod,
       passthroughSerial: options.passthroughSerial,
