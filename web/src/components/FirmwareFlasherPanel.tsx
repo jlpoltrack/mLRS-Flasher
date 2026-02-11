@@ -358,7 +358,8 @@ function FirmwareFlasherPanel({
   const renderComPortRow = (
     flashDisabled: boolean,
     flashTooltip: string | undefined,
-    extraButtons?: React.ReactNode
+    extraButtons?: React.ReactNode,
+    hideFlashButton = false
   ) => (
     <div className="form-group port-group full-width">
       <label>COM Port</label>
@@ -391,18 +392,20 @@ function FirmwareFlasherPanel({
           {isScanningPorts ? 'Scanning...' : 'Add Device'}
         </button>
 
-        <div title={flashTooltip}>
-          <button
-            className="btn-primary btn-flash"
-            onClick={handleFlash}
-            disabled={flashDisabled}
-            aria-label={`${flashButtonLabel} firmware`}
-          >
-            {isFlashing && flashTarget === flashBackendTarget ?
-              (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') :
-              flashButtonLabel}
-          </button>
-        </div>
+        {!hideFlashButton && (
+          <div title={flashTooltip}>
+            <button
+              className="btn-primary btn-flash"
+              onClick={handleFlash}
+              disabled={flashDisabled}
+              aria-label={`${flashButtonLabel} firmware`}
+            >
+              {isFlashing && flashTarget === flashBackendTarget ?
+                (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') :
+                flashButtonLabel}
+            </button>
+          </div>
+        )}
 
         {extraButtons}
 
@@ -709,7 +712,8 @@ function FirmwareFlasherPanel({
             >
               {isFlashing && flashTarget === BackendTarget.WirelessBridge ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
             </button>
-          </div>
+          </div>,
+          true
         )
       )}
     </div>
