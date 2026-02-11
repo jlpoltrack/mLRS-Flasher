@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-02-10
+// last updated: 2026-02-11
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -205,8 +205,8 @@ function FirmwareFlasherPanel({
       usbDeviceName: (flashMethod === FlashMethod.DFU) ? selectedUSBDevice : (flashMethod === FlashMethod.STLink ? (selectedStlink?.productName || 'ST-Link') : undefined),
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
-      // only send explicit chipset for tx internal (mcu selector); other pages let the api infer from flash method
-      chipset: (useLocalFile && targetType === TargetType.TxInternal) ? localChipset : undefined,
+      // send explicit chipset when local file mode has an mcu selector (tx internal, or receiver + esptool)
+      chipset: (useLocalFile && (targetType === TargetType.TxInternal || (targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool))) ? localChipset : undefined,
     });
   }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData, localChipset]);
 
@@ -570,22 +570,7 @@ function FirmwareFlasherPanel({
   // --- local file mode ui ---
   const renderLocalFileUI = () => (
     <div className="form-grid">
-      {/* row 1: mcu selector (tx internal) + flash method (if multiple) + local file picker */}
-      {targetType === TargetType.TxInternal && (
-        <div className="form-group span-1">
-          <label>Main Module</label>
-          <div className="select-wrapper">
-            <select
-              value={localChipset}
-              onChange={(e) => setLocalChipset(e.target.value)}
-              disabled={isFlashing}
-            >
-              <option value="esp32">ESP32</option>
-              <option value="esp32s3">ESP32-S3</option>
-            </select>
-          </div>
-        </div>
-      )}
+      {/* row 1: flash method + mcu selector (tx internal, or receiver + esptool) + local file picker */}
       {showFlashMethodSelector && (
         <div className="form-group span-1">
           <label>Flash Method</label>
@@ -602,8 +587,45 @@ function FirmwareFlasherPanel({
           </div>
         </div>
       )}
-      <div className={`form-group ${(showFlashMethodSelector || targetType === TargetType.TxInternal) ? 'span-3' : 'full-width'}`}>
-        {(showFlashMethodSelector || targetType === TargetType.TxInternal) && <label>&nbsp;</label>}
+      {targetType === TargetType.TxInternal && (
+        <div className="form-group span-1">
+          <label>Main Module</label>
+          <div className="select-wrapper">
+            <select
+              value={localChipset}
+              onChange={(e) => setLocalChipset(e.target.value)}
+              disabled={isFlashing}
+            >
+              <option value="esp32">ESP32</option>
+              <option value="esp32s3">ESP32-S3</option>
+            </select>
+          </div>
+        </div>
+      )}
+      {targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool && (
+        <div className="form-group span-1">
+          <label>MCU</label>
+          <div className="select-wrapper">
+            <select
+              value={localChipset}
+              onChange={(e) => setLocalChipset(e.target.value)}
+              disabled={isFlashing}
+            >
+              <option value="esp32">ESP32</option>
+              <option value="esp32s3">ESP32-S3</option>
+              <option value="esp32c3">ESP32-C3</option>
+              <option value="esp8266">ESP8266</option>
+            </select>
+          </div>
+        </div>
+      )}
+      {(() => {
+        const hasMcu = targetType === TargetType.TxInternal || (targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool);
+        const hasFlash = showFlashMethodSelector;
+        const spanClass = (hasFlash && hasMcu) ? 'span-2' : (hasFlash || hasMcu) ? 'span-3' : 'full-width';
+        return (
+      <div className={`form-group ${spanClass}`}>
+        {(hasFlash || hasMcu) && <label>&nbsp;</label>}
         <div className="local-file-input">
           <input
             type="file"
@@ -620,6 +642,8 @@ function FirmwareFlasherPanel({
           )}
         </div>
       </div>
+        );
+      })()}
 
       {/* passthrough serial selector for ap passthru */}
       {showSerialX && flashMethod === FlashMethod.APPassthru && (
