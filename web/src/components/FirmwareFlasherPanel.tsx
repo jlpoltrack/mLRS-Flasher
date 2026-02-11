@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-02-10
+// last updated: 2026-02-11
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -240,7 +240,9 @@ function FirmwareFlasherPanel({
           target: BackendTarget.WirelessBridge,
           reset: wirelessParams.reset,
           baudrate: wirelessParams.baud,
-          erase: wirelessParams.erase
+          erase: wirelessParams.erase,
+          flashMethod: 'esptool',
+          chipset: localBridgeChipset,
         });
         return;
     }
