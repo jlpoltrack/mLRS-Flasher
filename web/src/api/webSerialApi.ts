@@ -214,8 +214,10 @@ export const api = {
     }
   },
   
+  // TODO: implement flash cancellation for web version (e.g. abort the serial write loop)
   cancelPython: async (): Promise<void> => { 
-    // cancel functionality not implemented for web version
+    console.warn('cancel requested but not yet implemented in web version');
+    outputCallback?.({ type: 'info', message: 'Cancel is not yet supported in the web version.' });
   },
   
   onOutput: (callback: (data: any) => void) => {

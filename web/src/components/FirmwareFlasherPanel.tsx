@@ -7,9 +7,19 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-02-11
+// last updated: 2026-02-10
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
+
+// maps raw flash method values to user-friendly labels
+function getFlashMethodLabel(m: string): string {
+  if (m === FlashMethod.DFU) return 'DFU (USB)';
+  if (m === FlashMethod.STLink) return 'STLink (SWD)';
+  if (m === FlashMethod.UART) return 'SystemBoot (UART)';
+  if (m === FlashMethod.ESPTool) return 'ESPTool (UART)';
+  if (m === FlashMethod.APPassthru) return 'AP Passthru';
+  return m;
+}
 
 interface FirmwareFlasherPanelProps {
   title: string;
@@ -77,8 +87,6 @@ function FirmwareFlasherPanel({
     error,
     setError,
   } = useFirmwareLoader(targetType, selectedDevice, selectedVersion);
-
-
 
   const {
     ports,
@@ -197,8 +205,8 @@ function FirmwareFlasherPanel({
       usbDeviceName: (flashMethod === FlashMethod.DFU) ? selectedUSBDevice : (flashMethod === FlashMethod.STLink ? (selectedStlink?.productName || 'ST-Link') : undefined),
       baudrate: (flashMethod === FlashMethod.UART) ? 115200 : undefined,
       target: targetType === TargetType.Receiver ? BackendTarget.Receiver : BackendTarget.TxModule,
-      // pass explicit chipset in local file mode so orchestration layer uses correct assets
-      chipset: useLocalFile ? localChipset : undefined,
+      // only send explicit chipset for tx internal (mcu selector); other pages let the api infer from flash method
+      chipset: (useLocalFile && targetType === TargetType.TxInternal) ? localChipset : undefined,
     });
   }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData, localChipset]);
 
@@ -241,7 +249,7 @@ function FirmwareFlasherPanel({
           reset: wirelessParams.reset,
           baudrate: wirelessParams.baud,
           erase: wirelessParams.erase,
-          flashMethod: 'esptool',
+          flashMethod: FlashMethod.ESPTool,
           chipset: localBridgeChipset,
         });
         return;
@@ -687,48 +695,22 @@ function FirmwareFlasherPanel({
         </>
       )}
 
-      {/* bridge serial port + flash button */}
+      {/* bridge serial port + flash button — reuses shared com port helper */}
       {allowWirelessBridge && (
-        <div className="form-group port-group full-width">
-          <label>Serial Port Selection</label>
-          <div className="port-row">
-            <div className="select-wrapper">
-              <select
-                value={selectedPort}
-                onChange={(e) => {
-                  setSelectedPort(e.target.value);
-                  setError(null);
-                }}
-                disabled={isFlashing || isScanningPorts}
-              >
-                {ports.length === 0 ? (
-                  <option value="">No authorized devices</option>
-                ) : (
-                  ports.map(port => (
-                    <option key={port} value={port}>{port}</option>
-                  ))
-                )}
-              </select>
-            </div>
+        renderComPortRow(
+          isFlashing || !localBridgeFileData || !selectedPort,
+          !localBridgeFile ? 'Select a wireless bridge file first' : !selectedPort ? 'Select a COM port first' : isFlashing ? 'Flashing in progress' : undefined,
+          <div title={!localBridgeFile ? 'Select a wireless bridge file first' : !selectedPort ? 'Select a COM port first' : isFlashing ? 'Flashing in progress' : undefined}>
             <button
-              className="btn-secondary"
-              onClick={() => refreshPorts({ request: true })}
-              disabled={isFlashing || isScanningPorts}
+              className="btn-primary btn-flash"
+              onClick={handleFlashWirelessBridge}
+              disabled={isFlashing || !localBridgeFileData || !selectedPort}
+              aria-label="Flash Wireless Bridge firmware"
             >
-              {isScanningPorts ? 'Scanning...' : 'Add Device'}
+              {isFlashing && flashTarget === BackendTarget.WirelessBridge ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
             </button>
-            <div title={!localBridgeFile ? 'Select a wireless bridge file first' : !selectedPort ? 'Select a COM port first' : isFlashing ? 'Flashing in progress' : undefined}>
-              <button
-                className="btn-primary btn-flash"
-                onClick={handleFlashWirelessBridge}
-                disabled={isFlashing || !localBridgeFileData || !selectedPort}
-                aria-label="Flash Wireless Bridge firmware"
-              >
-                {isFlashing && flashTarget === BackendTarget.WirelessBridge ? (progress > 0 ? `Flashing... ${progress}%` : 'Flashing...') : 'Flash Wireless Bridge'}
-              </button>
-            </div>
           </div>
-        </div>
+        )
       )}
     </div>
   );
@@ -808,15 +790,9 @@ function FirmwareFlasherPanel({
                             onChange={(e) => setFlashMethod(e.target.value)}
                             disabled={isFlashing}
                           >
-                            {(metadata?.raw_flashmethod?.split(',') || []).map((m: string) => {
-                              let label = m;
-                              if (m === FlashMethod.DFU) label = 'DFU (USB)';
-                              if (m === FlashMethod.STLink) label = 'STLink (SWD)';
-                              if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
-                              if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
-                              if (m === FlashMethod.APPassthru) label = 'AP Passthru';
-                              return <option key={m} value={m}>{label}</option>;
-                            })}
+                            {(metadata?.raw_flashmethod?.split(',') || []).map((m: string) => (
+                              <option key={m} value={m}>{getFlashMethodLabel(m)}</option>
+                            ))}
                           </select>
                         </div>
                       </div>
@@ -847,15 +823,9 @@ function FirmwareFlasherPanel({
                         >
                           {(metadata?.raw_flashmethod?.split(',') || [])
                             .filter((m: string) => !isR9Rx || m === FlashMethod.STLink || m === FlashMethod.APPassthru)
-                            .map((m: string) => {
-                              let label = m;
-                              if (m === FlashMethod.DFU) label = 'DFU (USB)';
-                              if (m === FlashMethod.STLink) label = 'STLink (SWD)';
-                              if (m === FlashMethod.UART) label = 'SystemBoot (UART)';
-                              if (m === FlashMethod.ESPTool) label = 'ESPTool (UART)';
-                              if (m === FlashMethod.APPassthru) label = 'AP Passthru';
-                              return <option key={m} value={m}>{label}</option>;
-                            })}
+                            .map((m: string) => (
+                              <option key={m} value={m}>{getFlashMethodLabel(m)}</option>
+                            ))}
                         </select>
                       </div>
                     </div>
@@ -863,8 +833,8 @@ function FirmwareFlasherPanel({
                 </>
               )}
 
-              {/* com port selection */}
-              {((flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) || (metadata?.needsPort && flashMethod !== FlashMethod.DFU && flashMethod !== FlashMethod.STLink)) && (!isFrSkyR9 || (isFrSkyR9 && flashMethod === FlashMethod.APPassthru)) &&
+              {/* com port selection — shown for serial-based methods; r9 only shows port for ap passthru */}
+              {(flashMethod === FlashMethod.UART || flashMethod === FlashMethod.ESPTool || flashMethod === FlashMethod.APPassthru) && (!isFrSkyR9 || flashMethod === FlashMethod.APPassthru) &&
                 renderComPortRow(
                   isFlashing || !selectedFile || firmwareFiles.length === 0 || isLoadingFiles || !selectedPort,
                   isFlashing ? 'Flashing in progress' : !selectedFile || firmwareFiles.length === 0 ? 'Select a firmware file first' : isLoadingFiles ? 'Loading firmware files...' : !selectedPort ? 'Select a COM port first' : undefined,
