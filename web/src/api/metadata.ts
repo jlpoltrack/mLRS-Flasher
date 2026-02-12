@@ -69,18 +69,20 @@ export const g_targetDict: Record<string, any> = {
         'tx-radiomaster-bandit' : {
             'description' : "Flash method: connect to USB (select COM port)\n" +
                 "\nWireless bridge: ESP8285\n" +
-                "For flashing the wireless bridge: \n" +
-                "  - set 'Tx Ser Dest' to serial2\n" +
-                "  - set 'Tx Ser Baudrate' to 115200\n" +
+                "For flashing the wireless bridge, ensure the following settings are stored:\n" +
+                "  - 'Tx Ser Dest' = serial2\n" +
+                "  - 'Tx Ser Baudrate' = 115200\n" +
+                "IMPORTANT: If using Windows - click 'Flash Wireless Bridge' first and wait for the module to reboot before the next step.\n" +
                 "  - put Tx module into FLASH_ESP mode via OLED Actions page\n",
             'wireless' : { 'chipset' : 'esp8266', 'reset' : 'no dtr', 'baud' : 115200 },
         },
         'tx-radiomaster-nomad' : {
             'description' : "Flash method: connect to USB (select COM port)\n" +
                 "\nWireless bridge: ESP32C3\n" +
-                "For flashing the wireless bridge: \n" +
-                "  - set 'Tx Ser Dest' to serial2\n" +
-                "  - set 'Tx Ser Baudrate' to 115200\n" +
+                "For flashing the wireless bridge, ensure the following settings are stored:\n" +
+                "  - 'Tx Ser Dest' = serial2\n" +
+                "  - 'Tx Ser Baudrate' = 115200\n" +
+                "IMPORTANT: If using Windows - click 'Flash Wireless Bridge' first and wait for the module to reboot before the next step.\n" +
                 "  - put Tx module into FLASH_ESP by holding button located under the 'T' in RadioMaster for 4 seconds\n",
             'wireless' : { 'chipset' : 'esp32c3', 'reset' : 'no dtr', 'baud' : 115200, 'erase' : 'full_erase' },
         },
