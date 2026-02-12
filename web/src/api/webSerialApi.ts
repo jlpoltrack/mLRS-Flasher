@@ -1,5 +1,5 @@
 // web serial api - orchestration layer for flashing and downloads
-// 2026-02-11
+// 2026-02-12
 
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
@@ -162,7 +162,8 @@ export const api = {
       device: options.device,
       flashMethod: options.flashMethod,
       passthroughSerial: options.passthroughSerial,
-      isWirelessBridge: !!metadata?.isWirelessBridgeFirmware
+      isWirelessBridge: !!metadata?.isWirelessBridgeFirmware,
+      isLocalFile: !!options.firmwareData
     };
 
     // fetch firmware data if not provided
