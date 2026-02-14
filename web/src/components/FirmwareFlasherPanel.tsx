@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-01-16
+// last updated: 2026-02-14
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -64,7 +64,7 @@ function FirmwareFlasherPanel({
     setSelectedPort,
     isScanningPorts,
     refreshPorts,
-  } = useSerialPorts(isFlashing);
+  } = useSerialPorts(isFlashing, flashMethod, targetType);
 
   const {
     usbDevices, // Destructured
@@ -139,7 +139,6 @@ function FirmwareFlasherPanel({
        return;
     }
 
-    // clear any previous error before starting
     // clear any previous error before starting
     setError(null);
 

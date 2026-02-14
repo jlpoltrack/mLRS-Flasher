@@ -1,5 +1,5 @@
 // constants.ts - centralized constants for the mLRS Flasher
-// last updated: 2026-01-13
+// last updated: 2026-02-14
 
 /**
  * device target types for firmware flashing
@@ -105,8 +105,32 @@ export const SERIAL_FILTERS = [
 ] as const;
 
 /**
- * usb device filter presets
+ * usb device filter presets (broad - matches all STM32 vendor devices)
  */
 export const USB_FILTERS = [
   { vendorId: 0x0483 }, // STM32 Vendor ID
 ] as const;
+
+/**
+ * dfu bootloader usb filter (stm32 in dfu mode only)
+ */
+export const DFU_USB_FILTERS = [
+  { vendorId: 0x0483, productId: 0xDF11 },
+] as const;
+
+/**
+ * valid serial port vendor IDs per flash method
+ */
+export const SERIAL_VID_FILTERS: Record<string, number[]> = {
+  uart:       [0x10C4, 0x0403, 0x1A86],          // CP210x, FTDI, CH340
+  esptool:    [0x10C4, 0x0403, 0x1A86, 0x303A],   // + Espressif native USB
+  appassthru: [0x1209],                            // ArduPilot
+  internal:   [0x0483],                            // EdgeTX/OpenTX (filtered by PID below)
+};
+
+/**
+ * flash methods requiring exact VID+PID match (not just VID)
+ */
+export const SERIAL_VIDPID_FILTERS: Record<string, { vid: number; pid: number }[]> = {
+  internal: [{ vid: 0x0483, pid: 0x5740 }],       // EdgeTX/OpenTX VCP only
+};

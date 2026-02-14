@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePersistentState } from './usePersistentState';
+
+// last updated: 2026-02-14
+
 import { api } from '../api/webSerialApi';
 import {
   listPorts,
@@ -7,6 +10,7 @@ import {
   forgetAllPorts,
   listUSBDevices,
   requestUSBDevice,
+  filterPortsByMethod,
 } from '../api/hardwareService';
 import type { FirmwareFile } from '../types';
 
@@ -120,9 +124,11 @@ export function useFirmwareLoader(type: string, selectedDevice: string, selected
 
 /**
  * custom hook for managing serial port selection
+ * filters ports by flash method when provided
  */
-export function useSerialPorts(isPaused = false) {
+export function useSerialPorts(isPaused = false, flashMethod = '', targetType = '') {
   const [ports, setPorts] = useState<string[]>([]);
+  const [rawPorts, setRawPorts] = useState<SerialPort[]>([]);
   const [selectedPort, setSelectedPort] = usePersistentState('flasher_selectedPort', '');
   const [isScanningPorts, setIsScanningPorts] = useState(false);
 
@@ -154,6 +160,12 @@ export function useSerialPorts(isPaused = false) {
       
       const newPorts = result.ports || [];
       
+      // store raw serial port objects for filtering
+      if (navigator.serial) {
+        const serialPorts = await navigator.serial.getPorts();
+        setRawPorts(serialPorts);
+      }
+      
       // only update if port list actually changed to avoid unnecessary re-renders
       setPorts(prevPorts => {
         if (JSON.stringify(prevPorts) === JSON.stringify(newPorts)) {
@@ -165,22 +177,7 @@ export function useSerialPorts(isPaused = false) {
       // If we just added a new port, select it immediately
       if (newPort && newPorts.includes(newPort)) {
           setSelectedPort(newPort);
-          return;
       }
-      
-      // if selected port is no longer available, select first available
-      setSelectedPort(prevSelected => {
-        if (prevSelected && newPorts.includes(prevSelected)) {
-           return prevSelected;
-        }
-
-        // Try to auto-select ArduPilot
-        const ardupilotPort = newPorts.find((p: string) => p.includes('ArduPilot'));
-        if (ardupilotPort) return ardupilotPort;
-
-        // Fallback to first available
-        return newPorts.length > 0 ? newPorts[0] : '';
-      });
     } catch (err) {
       console.error('Failed to list ports:', err);
     } finally {
@@ -224,8 +221,28 @@ export function useSerialPorts(isPaused = false) {
       refreshPorts({ silent: true }); // Silent refresh to update list
   }, [refreshPorts]);
 
+  // derive filter key from flash method and target type
+  const filterKey = targetType === 'txint' ? 'internal' : flashMethod;
+
+  // apply strict filtering based on flash method
+  const filteredPorts = useMemo(() => {
+    if (!filterKey || rawPorts.length === 0) return ports;
+    return filterPortsByMethod(ports, rawPorts, filterKey);
+  }, [ports, rawPorts, filterKey]);
+
+  // if selected port is not in filtered list, auto-select first filtered port
+  useEffect(() => {
+    if (filteredPorts.length > 0) {
+      if (!selectedPort || !filteredPorts.includes(selectedPort)) {
+        // prioritize ArduPilot if available in filtered list
+        const ardupilotPort = filteredPorts.find(p => p.includes('ArduPilot'));
+        setSelectedPort(ardupilotPort || filteredPorts[0]);
+      }
+    }
+  }, [filteredPorts, selectedPort, setSelectedPort]);
+
   return {
-    ports,
+    ports: filteredPorts,
     selectedPort,
     setSelectedPort,
     isScanningPorts,
