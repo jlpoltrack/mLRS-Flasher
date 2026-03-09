@@ -2,7 +2,7 @@ import { SERIAL_FILTERS, DFU_USB_FILTERS, SERIAL_VID_FILTERS, SERIAL_VIDPID_FILT
 import { isStlinkDevice } from './stlink';
 
 // hardware service - manages web serial and webusb connections
-// last updated: 2026-02-14
+// last updated: 2026-03-09
 
 // module-level state for selected devices
 let selectedPort: SerialPort | null = null;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { usePersistentState } from './usePersistentState';
 
-// last updated: 2026-02-14
+// last updated: 2026-03-09
 
 import { api } from '../api/webSerialApi';
 import {

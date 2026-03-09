@@ -1,5 +1,5 @@
 // constants.ts - centralized constants for the mLRS Flasher
-// last updated: 2026-02-14
+// last updated: 2026-03-09
 
 /**
  * device target types for firmware flashing
@@ -102,13 +102,7 @@ export const SERIAL_FILTERS = [
   { usbVendorId: 0x10C4 },                       // CP210x (Silicon Labs)
   { usbVendorId: 0x0403 },                       // FTDI
   { usbVendorId: 0x1A86 },                       // CH340 (WCH)
-] as const;
-
-/**
- * usb device filter presets (broad - matches all STM32 vendor devices)
- */
-export const USB_FILTERS = [
-  { vendorId: 0x0483 }, // STM32 Vendor ID
+  { usbVendorId: 0x2E8A },                       // Raspberry Pi (RP2040/RP2350)
 ] as const;
 
 /**
@@ -123,7 +117,7 @@ export const DFU_USB_FILTERS = [
  */
 export const SERIAL_VID_FILTERS: Record<string, number[]> = {
   uart:       [0x10C4, 0x0403, 0x1A86],          // CP210x, FTDI, CH340
-  esptool:    [0x10C4, 0x0403, 0x1A86, 0x303A],   // + Espressif native USB
+  esptool:    [0x10C4, 0x0403, 0x1A86, 0x303A, 0x2E8A], // + Espressif native USB, Raspberry Pi RP MCUs
   appassthru: [0x1209],                            // ArduPilot
   internal:   [0x0483],                            // EdgeTX/OpenTX (filtered by PID below)
 };

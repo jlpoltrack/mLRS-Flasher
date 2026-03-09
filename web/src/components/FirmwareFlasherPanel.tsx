@@ -7,7 +7,7 @@ import type { Version } from '../types';
 import { FlashMethod, TargetType, BackendTarget, DEFAULT_FLASH_METHOD } from '../constants';
 import './panel.css';
 
-// last updated: 2026-02-14
+// last updated: 2026-03-09
 
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
@@ -215,7 +215,6 @@ function FirmwareFlasherPanel({
   const isR9Tx = selectedDevice?.includes('FrSky R9') && targetType === TargetType.TxExternal;
 
   // Enforce allowed methods for R9 Rx/Tx
-  // Enforce allowed methods for R9 Rx/Tx
   useEffect(() => {
     if (isR9Rx) {
       if (flashMethod !== FlashMethod.STLink && flashMethod !== FlashMethod.APPassthru) {
@@ -308,7 +307,6 @@ function FirmwareFlasherPanel({
         {(() => {
             return (
                 <>
-                    {/* Standard Flash Method & Port Selection - Always show for R9 Tx since the two firmware paths are independent */}
                     {/* Standard Flash Method & Port Selection */}
                         <>
                             {/* Flash Method Selection */}
