@@ -9,6 +9,9 @@ import './panel.css';
 
 // last updated: 2026-03-16
 
+// flash method used when in local-file mode (separate from the metadata-driven flashMethod)
+// so toggling modes doesn't leave an invalid method from the other mode
+
 const SERIAL_PORTS = ['SERIAL1', 'SERIAL2', 'SERIAL3', 'SERIAL4', 'SERIAL5', 'SERIAL6', 'SERIAL7', 'SERIAL8'];
 
 // maps raw flash method values to user-friendly labels
@@ -50,7 +53,10 @@ function FirmwareFlasherPanel({
 }: FirmwareFlasherPanelProps) {
   const [selectedDevice, setSelectedDevice] = usePersistentState(`flasher_${targetType}_selectedDevice`, '');
   const [selectedVersion, setSelectedVersion] = usePersistentState(`flasher_${targetType}_selectedVersion`, '');
-  const [flashMethod, setFlashMethod] = usePersistentState(`flasher_${targetType}_flashMethod`, '');
+  const [stdFlashMethod, setStdFlashMethod] = usePersistentState(`flasher_${targetType}_flashMethod`, '');
+  const [localFlashMethod, setLocalFlashMethod] = usePersistentState(`flasher_${targetType}_localFlashMethod`, '');
+  const flashMethod = useLocalFile ? localFlashMethod : stdFlashMethod;
+  const setFlashMethod = useLocalFile ? setLocalFlashMethod : setStdFlashMethod;
   const [serialX, setSerialX] = usePersistentState(`flasher_${targetType}_serialX`, 'SERIAL1');
   const [selectedElrsFile, setSelectedElrsFile] = usePersistentState(`flasher_${targetType}_selectedElrsFile`, '');
 
@@ -131,7 +137,7 @@ function FirmwareFlasherPanel({
     }
   }, [metadata, flashMethod, setFlashMethod, useLocalFile]);
 
-  // Select default ELRS file for R9 Tx
+  // select default ELRS file for R9 Tx
   useEffect(() => {
     if (selectedDevice?.includes('FrSky R9') && targetType === TargetType.TxExternal) {
       const elrsFiles = firmwareFiles.filter(f => f.filename.toLowerCase().endsWith('.elrs'));
@@ -193,7 +199,7 @@ function FirmwareFlasherPanel({
     onFlash({
       type: targetType,
       programmer: programmer, 
-      device: selectedDevice,
+      device: useLocalFile ? 'local' : selectedDevice,
       // empty string signals local file mode; backend skips github download when firmwareData is provided
       version: useLocalFile ? '' : selectedVersion,
       flashMethod: flashMethod,
@@ -208,7 +214,7 @@ function FirmwareFlasherPanel({
       // send explicit chipset when local file mode has an mcu selector (tx internal, or receiver + esptool)
       chipset: (useLocalFile && (targetType === TargetType.TxInternal || (targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool))) ? localChipset : undefined,
     });
-  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData, localChipset]);
+  }, [firmwareFiles, selectedFile, flashMethod, selectedDevice, selectedVersion, selectedPort, selectedUSBDevice, selectedStlink, serialX, setError, onFlash, targetType, metadata, useLocalFile, localFile, localFileData, localChipset, setFlashMethod]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, isBridge = false) => {
     const file = e.target.files?.[0];
@@ -297,14 +303,14 @@ function FirmwareFlasherPanel({
   const isR9Rx = isFrSkyR9 && targetType === TargetType.Receiver;
   const isR9Tx = selectedDevice?.includes('FrSky R9') && targetType === TargetType.TxExternal;
 
-  // Enforce allowed methods for R9 Rx/Tx
+  // enforce allowed methods for R9 Rx/Tx
   useEffect(() => {
     if (isR9Rx) {
       if (flashMethod !== FlashMethod.STLink && flashMethod !== FlashMethod.APPassthru) {
         setFlashMethod(FlashMethod.STLink);
       }
       
-      // Enforce HEX selection for R9 Rx if using STLink
+      // enforce HEX selection for R9 Rx if using STLink
       if (flashMethod === FlashMethod.STLink && firmwareFiles.length > 0) {
           const currentIsElrs = selectedFile?.toLowerCase().endsWith('.elrs');
           const currentIsHex = selectedFile?.toLowerCase().endsWith('.hex');
@@ -315,7 +321,7 @@ function FirmwareFlasherPanel({
           }
       }
     } else if (isR9Tx) {
-       // Force STLink for R9 Tx if method is not set or default
+       // force STLink for R9 Tx if method is not set or default
         if (!flashMethod || flashMethod === DEFAULT_FLASH_METHOD) {
             setFlashMethod(FlashMethod.STLink);
         }
@@ -341,6 +347,8 @@ function FirmwareFlasherPanel({
   }, [targetType]);
 
   const showFlashMethodSelector = localFlashMethods.length > 1;
+  const localHasMcuSelector = targetType === TargetType.TxInternal || (targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool);
+  const filePickerSpanClass = (showFlashMethodSelector && localHasMcuSelector) ? 'span-2' : (showFlashMethodSelector || localHasMcuSelector) ? 'span-3' : 'full-width';
 
   // set default flash method for local file mode
   useEffect(() => {
@@ -619,13 +627,8 @@ function FirmwareFlasherPanel({
           </div>
         </div>
       )}
-      {(() => {
-        const hasMcu = targetType === TargetType.TxInternal || (targetType === TargetType.Receiver && flashMethod === FlashMethod.ESPTool);
-        const hasFlash = showFlashMethodSelector;
-        const spanClass = (hasFlash && hasMcu) ? 'span-2' : (hasFlash || hasMcu) ? 'span-3' : 'full-width';
-        return (
-      <div className={`form-group ${spanClass}`}>
-        {(hasFlash || hasMcu) && <label>&nbsp;</label>}
+      <div className={`form-group ${filePickerSpanClass}`}>
+        {(showFlashMethodSelector || localHasMcuSelector) && <label>&nbsp;</label>}
         <div className="local-file-input">
           <input
             type="file"
@@ -642,8 +645,6 @@ function FirmwareFlasherPanel({
           )}
         </div>
       </div>
-        );
-      })()}
 
       {/* passthrough serial selector for ap passthru */}
       {showSerialX && flashMethod === FlashMethod.APPassthru && (
