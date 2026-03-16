@@ -238,6 +238,9 @@ export function useSerialPorts(isPaused = false, flashMethod = '', targetType = 
         const ardupilotPort = filteredPorts.find(p => p.includes('ArduPilot'));
         setSelectedPort(ardupilotPort || filteredPorts[0]);
       }
+    } else if (selectedPort) {
+      // clear stale selection when no ports match the current filter
+      setSelectedPort('');
     }
   }, [filteredPorts, selectedPort, setSelectedPort]);
 
