@@ -1,7 +1,8 @@
-import { SERIAL_FILTERS, USB_FILTERS } from '../constants';
+import { SERIAL_FILTERS, DFU_USB_FILTERS, SERIAL_VID_FILTERS, SERIAL_VIDPID_FILTERS } from '../constants';
+import { isStlinkDevice } from './stlink';
 
 // hardware service - manages web serial and webusb connections
-// 2026-01-13
+// last updated: 2026-03-09
 
 // module-level state for selected devices
 let selectedPort: SerialPort | null = null;
@@ -84,22 +85,29 @@ export async function forgetAllPorts(): Promise<void> {
   selectedPort = null;
 }
 
-// list all authorized usb devices
+// check if a usb device is an stm32 dfu bootloader
+export function isDfuDevice(device: USBDevice): boolean {
+  return device.vendorId === 0x0483 && device.productId === 0xDF11;
+}
+
+// list authorized usb devices, filtered to only dfu bootloaders
 export async function listUSBDevices(): Promise<{ devices: string[] }> {
   if (!navigator.usb) return { devices: [] };
   const devices = await navigator.usb.getDevices();
-  return { devices: devices.map(formatUSBName) };
+  // only return dfu bootloader devices, exclude st-link and other stm32 devices
+  const dfuDevices = devices.filter(d => isDfuDevice(d) && !isStlinkDevice(d));
+  return { devices: dfuDevices.map(formatUSBName) };
 }
 
-// request user to select a usb device
+// request user to select a usb device (dfu bootloaders only)
 export async function requestUSBDevice(): Promise<string | null> {
   if (!navigator.usb) {
     alert('WebUSB API not supported in this browser.');
     return null;
   }
   try {
-    // spread to mutable array
-    selectedUSBDevice = await navigator.usb.requestDevice({ filters: [...USB_FILTERS] });
+    // use dfu-specific filter so browser picker only shows dfu bootloaders
+    selectedUSBDevice = await navigator.usb.requestDevice({ filters: [...DFU_USB_FILTERS] });
     return formatUSBName(selectedUSBDevice);
   } catch (err) {
     return null;
@@ -166,6 +174,36 @@ export function formatPortName(port: SerialPort): string {
   }
 
   return display;
+}
+
+// filter serial ports by flash method using VID/PID rules
+export function filterPortsByMethod(ports: string[], allPorts: SerialPort[], flashMethod: string): string[] {
+  const vidFilter = SERIAL_VID_FILTERS[flashMethod];
+  const vidPidFilter = SERIAL_VIDPID_FILTERS[flashMethod];
+  
+  // if no filter defined for this method, return all ports
+  if (!vidFilter && !vidPidFilter) return ports;
+  
+  const uniquePorts = getUniquePorts(allPorts);
+  
+  return ports.filter(portName => {
+    const match = uniquePorts.find(p => p.name === portName);
+    if (!match) return false;
+    
+    const info = match.port.getInfo();
+    const vid = info.usbVendorId;
+    const pid = info.usbProductId;
+    
+    if (vid === undefined) return false;
+    
+    // if vidpid filter exists for this method, use exact match
+    if (vidPidFilter) {
+      return vidPidFilter.some(f => f.vid === vid && f.pid === pid);
+    }
+    
+    // otherwise match by vid only
+    return vidFilter.includes(vid);
+  });
 }
 
 // format a usb device for display
