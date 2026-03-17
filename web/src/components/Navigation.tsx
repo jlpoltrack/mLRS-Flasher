@@ -1,15 +1,19 @@
 import React from 'react';
-import { Radio, Cpu, FileCode } from 'lucide-react';
+import { Radio, Cpu, FileCode, HardDrive } from 'lucide-react';
 import { TargetType } from '../constants';
 import './navigation.css';
 import logo from '../assets/logo.png';
 
+// last updated: 2026-02-09
+
 interface NavigationProps {
   activeTab: TargetType | 'lua';
   onTabChange: (tabId: TargetType | 'lua') => void;
+  useLocalFile: boolean;
+  onLocalFileToggle: (value: boolean) => void;
 }
 
-function Navigation({ activeTab, onTabChange }: NavigationProps) {
+function Navigation({ activeTab, onTabChange, useLocalFile, onLocalFileToggle }: NavigationProps) {
   const tabs: { id: TargetType | 'lua'; label: string; icon: React.ReactNode }[] = [
     { id: TargetType.TxExternal, label: 'Tx Module (External)', icon: <Radio size={20} /> },
     { id: TargetType.Receiver, label: 'Receiver', icon: <Cpu size={20} /> },
@@ -45,6 +49,17 @@ function Navigation({ activeTab, onTabChange }: NavigationProps) {
             {activeTab === tab.id && <div className="active-glow" />}
           </button>
         ))}
+      </div>
+
+      <div className="nav-footer">
+        <button
+          className={`nav-tab local-file-tab ${useLocalFile ? 'active' : ''}`}
+          onClick={() => onLocalFileToggle(!useLocalFile)}
+        >
+          <span className="tab-icon"><HardDrive size={20} /></span>
+          <span className="tab-label">Local File</span>
+          {useLocalFile && <div className="active-glow" />}
+        </button>
       </div>
     </nav>
   );

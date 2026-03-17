@@ -1,5 +1,5 @@
 // DeviceView.tsx - unified component replacing Receiver, TxModuleExternal, TxModuleInternal
-// last updated: 2026-01-13
+// last updated: 2026-02-09
 
 import FirmwareFlasherPanel from './FirmwareFlasherPanel';
 import { DEVICE_CONFIGS, TargetType, BackendTarget } from '../constants';
@@ -13,6 +13,7 @@ interface DeviceViewProps {
   isFlashing: boolean;
   flashTarget: BackendTarget | null;
   progress: number;
+  useLocalFile: boolean;
 }
 
 function DeviceView({ targetType, ...props }: DeviceViewProps) {

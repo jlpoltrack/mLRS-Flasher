@@ -29,6 +29,7 @@ export interface FlasherOptions {
   flashMethod?: string;
   passthroughSerial?: string;
   isWirelessBridge?: boolean; // external tx wireless bridge mode
+  isLocalFile?: boolean; // true when flashing a user-selected local file
 }
 
 export async function flash(
@@ -225,7 +226,7 @@ async function flashESP(
   options: FlasherOptions
 ): Promise<void> {
   const sm = new FlasherStateMachine(options.onProgress, options.onLog);
-  const { baud = 921600, erase, filename, reset, flashMethod } = options;
+  const { baud = 921600, erase, filename, reset, flashMethod, isLocalFile } = options;
 
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
@@ -320,14 +321,14 @@ async function flashESP(
             bootloaderOffset = 0x1000;
             flashSize = '4MB';
             
-            // Determine bootloader 40dio vs 80qio
-            let bootloaderFile = 'bootloader_40dio.bin';
-            if (filename) {
+            // local file mode always uses 80qio; github downloads use version-based selection
+            let bootloaderFile = 'bootloader_80qio.bin';
+            if (!isLocalFile && filename) {
                 const match = filename.match(/v(\d+)\.(\d+)\.(\d+)/);
                 if (match) {
                     const [_, major, minor, patch] = match.map(Number);
-                    if (major > 1 || (major === 1 && minor > 3) || (major === 1 && minor === 3 && patch >= 7)) {
-                        bootloaderFile = 'bootloader_80qio.bin';
+                    if (major < 1 || (major === 1 && minor < 3) || (major === 1 && minor === 3 && patch < 7)) {
+                        bootloaderFile = 'bootloader_40dio.bin';
                     }
                 }
             }
