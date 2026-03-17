@@ -46,7 +46,7 @@ Locate `g_targetDict` and add a new entry using the `fname` you defined in Step 
 ### Basic Example
 ```typescript
 'tx-mybrand': {
-    'flashmethod': 'stlink', // Comma separated: 'stlink', 'dfu', 'uart', 'esptool', 'appassthru'
+    'flashmethod': 'stlink', // Comma separated: 'stlink', 'dfu', 'uart', 'esptool', 'ardupilot_passthrough'
     'description': "Flash method: STLink\n  - connect SWD pads...\n",
 },
 ```
@@ -89,4 +89,5 @@ If a single brand has multiple specific devices with different settings (e.g., `
 - `dfu`: STM32 DFU Mode
 - `uart`: STM32 serial bootloader
 - `esptool`: ESP32/ESP8266 serial bootloader
-- `appassthru`: ArduPilot Passthrough (usually added as a secondary option)
+- `ardupilot_passthrough`: ArduPilot Passthrough (usually added as a secondary option)
+- `inav_passthrough`: INAV Passthrough (usually added as a secondary option)

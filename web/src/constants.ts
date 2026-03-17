@@ -1,5 +1,5 @@
 // constants.ts - centralized constants for the mLRS Flasher
-// last updated: 2026-03-09
+// last updated: 2026-03-17
 
 /**
  * device target types for firmware flashing
@@ -33,7 +33,8 @@ export const FlashMethod = {
   DFU: 'dfu',
   ESPTool: 'esptool',
   STLink: 'stlink',
-  APPassthru: 'appassthru',
+  ArduPilotPassthrough: 'ardupilot_passthrough',
+  InavPassthrough: 'inav_passthrough',
   ELRSBL: 'elrsbl',
 } as const;
 
@@ -118,7 +119,7 @@ export const DFU_USB_FILTERS = [
 export const SERIAL_VID_FILTERS: Record<string, number[]> = {
   uart:       [0x10C4, 0x0403, 0x1A86],          // CP210x, FTDI, CH340
   esptool:    [0x10C4, 0x0403, 0x1A86, 0x303A, 0x2E8A], // + Espressif native USB, Raspberry Pi RP MCUs
-  appassthru: [0x1209],                            // ArduPilot
+  ardupilot_passthrough: [0x1209],                  // ArduPilot
   internal:   [0x0483],                            // EdgeTX/OpenTX (filtered by PID below)
 };
 

@@ -1,7 +1,9 @@
-import { ESPLoader, Transport } from 'esptool-js';
+// 2026-03-17
+import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 
-import { initApPassthrough } from './apPassthru';
+import { initArduPilotPassthrough } from './ardupilotPassthrough';
+import { InavPassthroughService } from './inavPassthrough';
 import { FlasherStateMachine } from './flasherStateMachine';
 import { parseHex } from './hexParser';
 import { getPageSize, isKnownChip, FLASH_BASE, MAX_FLASH_SIZE } from './chipConstants';
@@ -28,6 +30,8 @@ export interface FlasherOptions {
   device?: string;
   flashMethod?: string;
   passthroughSerial?: string;
+  passthroughIdentifier?: number; // UART Index for INAV Passthrough
+  activationBaud?: number; // Baud rate used for activation/reboot on STM32
   isWirelessBridge?: boolean; // external tx wireless bridge mode
   isLocalFile?: boolean; // true when flashing a user-selected local file
 }
@@ -54,13 +58,13 @@ export async function flash(
         }
         return flashSTM32DFU(port as USBDevice, firmwareData, options);
     } else {
-        if (flashMethod === 'appassthru') {
+        if (flashMethod === 'ardupilot_passthrough') {
             if (!options.passthroughSerial) {
-                throw new Error("Passthrough Serial port not specified for AP Passthrough");
+                throw new Error("Passthrough Serial port not specified for ArduPilot Passthrough");
             }
             
             const isEsp = chipset.startsWith('esp');
-            const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, isEsp, onLog);
+            const result = await initArduPilotPassthrough(port as SerialPort, options.passthroughSerial, isEsp, onLog);
             port = result.port;
             
             // For STM32, if we didn't force 115200, we might need to tell the flasher to use the detected baud
@@ -68,6 +72,24 @@ export async function flash(
                 options.baud = result.baudRate;
                 onLog?.(`STM32 Passthrough: Using FC baud rate ${options.baud}`);
             }
+        } else if (flashMethod === 'inav_passthrough') {
+             if (options.passthroughIdentifier === undefined) {
+                 throw new Error("Target UART not specified for INAV Passthrough");
+             }
+             const svc = new InavPassthroughService(port as SerialPort, onLog);
+
+             // Use detected baud rate for passthrough activation, default to 115200
+             const activationBaud = options.activationBaud || 115200;
+             onLog?.(`INAV Passthrough: Using activation baud ${activationBaud}`);
+
+             // Connect at activation baud - INAV mirrors host baud to the bridged UART
+             await svc.reconnect(activationBaud);
+
+             // Send passthrough command and reboot (enterPassthrough closes port when done)
+             await svc.enterPassthrough(options.passthroughIdentifier, activationBaud, true);
+
+             // STM32 bootloader uses 115200 - INAV will mirror when we reopen at this baud
+             options.baud = 115200;
         }
         return flashSTM32UART(port as SerialPort, firmwareData, options);
     }
@@ -103,14 +125,22 @@ export async function flash(
          await new Promise(r => setTimeout(r, 500));
      }
 
-     // Handle AP Passthru for ESP
-     if (flashMethod === 'appassthru') {
+     // Handle ArduPilot Passthrough for ESP
+     if (flashMethod === 'ardupilot_passthrough') {
         if (!options.passthroughSerial) {
-            throw new Error("Passthrough Serial port not specified for AP Passthrough");
+            throw new Error("Passthrough Serial port not specified for ArduPilot Passthrough");
         }
-        const result = await initApPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
+        const result = await initArduPilotPassthrough(port as SerialPort, options.passthroughSerial, true, onLog);
         port = result.port;
-        // ESP always forced to 115200 by initApPassthrough logic
+        // ESP always forced to 115200 by initArduPilotPassthrough logic
+     } else if (flashMethod === 'inav_passthrough') {
+        if (options.passthroughIdentifier === undefined) {
+            throw new Error("Target UART not specified for INAV Passthrough");
+        }
+        const svc = new InavPassthroughService(port as SerialPort, onLog);
+        await svc.connect();
+        await svc.enterPassthrough(options.passthroughIdentifier, 921600);
+        options.baud = 921600;
      }
 
      return flashESP(port as SerialPort, firmwareData, options);
@@ -162,7 +192,6 @@ export async function initEdgeTXPassthrough(
                 }
             } catch (e) {
                  // Timeout or read error
-                 if (response.length > 0) break; // Return what we have
             }
         }
 
@@ -185,9 +214,9 @@ export async function initEdgeTXPassthrough(
         
         onLog?.("Power cycling RF module...");
         await executeCommand('set rfmod 0 power off');
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
         await executeCommand('set rfmod 0 power on');
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
 
         if (isWirelessBridge) {
             onLog?.("Waiting 7s for wireless bridge configuration...");
@@ -230,21 +259,27 @@ async function flashESP(
 
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
-  // Ensure port is closed (so esptool can open it)
+  // Ensure port is closed (so esptool can open it) 
   if (port.readable || port.writable) {
+      sm.log("Port appears open, attempting to close...");
       try {
           await port.close(); 
+          sm.log("Port closed in flashESP.");
       } catch (e) {
-          sm.log(`Warning: Port closure check: ${e instanceof Error ? e.message : String(e)}`);
+          sm.log(`Warning: Port closure in flashESP failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+      // Wait a moment for OS to release the port
+      await new Promise(r => setTimeout(r, 500));
   }
+
+  // give the browser extra time to fully release the port
+  await new Promise(r => setTimeout(r, 500));
 
   // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port as any);
 
-  // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
-  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'appassthru') {
-      sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
+  // disable DTR/RTS for manual bootloader and passthrough modes
+  if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') {
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };
   }
@@ -254,14 +289,32 @@ async function flashESP(
     baudrate: baud,
     terminal: {
         clean: () => {},
-        writeLine: (data: string) => sm.log(data),
-        write: (data: string) => sm.log(data),
+        writeLine: (data: string) => { 
+            const trimmed = data.trim();
+            if (trimmed.length > 0 && trimmed !== 'esptool.js' && !trimmed.startsWith('Serial port')) {
+                sm.log(data); 
+            }
+        },
+        write: (data: string) => { 
+            const trimmed = data.trim();
+            if (trimmed.length > 0 && trimmed !== 'esptool.js' && !trimmed.startsWith('Serial port')) {
+                sm.log(data); 
+            }
+        },
     },
     romBaudrate: 115200,
   });
 
   try {
-    const chipName = await esploader.main();
+    let chipName: string;
+    
+    const resetMode = (flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') 
+        ? 'no_reset' as Before 
+        : (reset as Before || 'default_reset');
+    
+
+    chipName = await esploader.main(resetMode);
+    
     sm.log(`Detected chip: ${chipName}`);
 
     if (erase === 'full_erase') {
@@ -379,7 +432,7 @@ async function flashESP(
     // Manual Reset Sequence (resets the ESP)
     await transport.setDTR(false);
     await transport.setRTS(true);
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 500));
     await transport.setRTS(false);
     
     await transport.disconnect();
@@ -397,9 +450,9 @@ async function flashESP(
         
         // toggle DTR to trigger main MCU reset
         await port.setSignals({ dataTerminalReady: false });
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 500));
         await port.setSignals({ dataTerminalReady: true });
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 500));
         await port.setSignals({ dataTerminalReady: false });
         
         writer.releaseLock();
@@ -760,6 +813,20 @@ async function flashSTM32UART(
   const sm = new FlasherStateMachine(options.onProgress, options.onLog);
   sm.transition('CONNECTING', "Starting STM32 UART flash...");
 
+  // Ensure port is closed (so stm32 flasher can open it with correct parity)
+  // Rapid state changes and parity switches can cause browser/driver crashes.
+  if (port.readable || port.writable) {
+      sm.log("Port appears open, attempting to close to stabilize...");
+      try {
+          await port.close();
+          sm.log("Port closed for stabilization.");
+      } catch (e) {
+          sm.log(`Warning: Port closure during stabilization failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      // Give the OS/browser extra time to fully release the port and settle
+      await new Promise(r => setTimeout(r, 1000));
+  }
+
   let memoryBlocks: { address: number, data: Uint8Array }[] = [];
 
   if (options.filename?.toLowerCase().endsWith('.hex')) {
@@ -856,8 +923,10 @@ async function flashSTM32UART(
             sm.updateProgress(progress);
 
             // Log progress every 10KB
-            if (totalWritten - lastLogBytes >= 10240) {
-                sm.log(`Written ${Math.floor(totalWritten / 1024)} KB...`);
+            const currentKb = Math.floor(totalWritten / 1024);
+            const lastKb = Math.floor(lastLogBytes / 1024);
+            if ((currentKb === 1 && lastKb === 0) || (currentKb >= 10 && Math.floor(currentKb / 10) > Math.floor(lastKb / 10))) {
+                sm.log(`Written ${currentKb} KB...`);
                 lastLogBytes = totalWritten;
             }
         }
@@ -894,8 +963,10 @@ async function flashSTM32UART(
             const progress = Math.round((totalWritten / totalSize) * 100);
             sm.updateProgress(progress);
 
-            if (totalWritten - lastLogBytes >= 10240) {
-                sm.log(`Verified ${Math.floor(totalWritten / 1024)} KB...`);
+            const currentKb = Math.floor(totalWritten / 1024);
+            const lastKb = Math.floor(lastLogBytes / 1024);
+            if ((currentKb === 1 && lastKb === 0) || (currentKb >= 10 && Math.floor(currentKb / 10) > Math.floor(lastKb / 10))) {
+                sm.log(`Verified ${currentKb} KB...`);
                 lastLogBytes = totalWritten;
             }
         }
