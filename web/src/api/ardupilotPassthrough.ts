@@ -462,13 +462,8 @@ export async function initArduPilotPassthrough(
              throw new Error(`Invalid ${pProtocolName}=${protocol}. Must be 2 (MAVLink2) or 28 (Scripting).`);
         }
 
-        // Baud Rate Check
-        let receiverBaud = 57600;
-        if (baudVal === 57) receiverBaud = 57600;
-        else if (baudVal === 115) receiverBaud = 115200;
-        else if (baudVal === 230) receiverBaud = 230400;
-        else if (baudVal === 921) receiverBaud = 921600;
-        else if (baudVal === 38) receiverBaud = 38400;
+        // baud rate check — reuse the full lookup table
+        const receiverBaud = BAUD_LOOKUP[baudVal] || baudVal * 1000;
 
         if (receiverBaud !== 57600) {
             onLog?.(`Receiver baud is ${receiverBaud}. Switching link...`);

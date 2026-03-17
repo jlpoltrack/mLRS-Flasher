@@ -259,9 +259,6 @@ async function flashESP(
 
   sm.transition('CONNECTING', "Connecting to ESP device...");
   
-  // Debug: Check port state
-  // sm.log(`Port state check: readable=${!!port.readable}, writable=${!!port.writable}`);
-  
   // Ensure port is closed (so esptool can open it) 
   if (port.readable || port.writable) {
       sm.log("Port appears open, attempting to close...");
@@ -274,19 +271,15 @@ async function flashESP(
       // Wait a moment for OS to release the port
       await new Promise(r => setTimeout(r, 500));
   }
-  
-  // sm.log(`Port state after close: readable=${!!port.readable}, writable=${!!port.writable}`);
 
-  // Give the browser extra time to fully release the port
-  // sm.log("Waiting 500ms for port to fully stabilize...");
+  // give the browser extra time to fully release the port
   await new Promise(r => setTimeout(r, 500));
 
   // @ts-ignore: ESPLoader types are not perfect
   const transport = new Transport(port as any);
 
-  // FIX: Provide mechanism to disable DTR/RTS for manual bootloader devices
+  // disable DTR/RTS for manual bootloader and passthrough modes
   if ((reset && (reset.includes('no dtr') || reset.includes('no_reset'))) || flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') {
-      // sm.log("Mode: Manual Bootloader / Passthru (No DTR/RTS toggle)");
       transport.setDTR = async () => { /* no-op */ };
       transport.setRTS = async () => { /* no-op */ };
   }
@@ -319,18 +312,6 @@ async function flashESP(
         ? 'no_reset' as Before 
         : (reset as Before || 'default_reset');
     
-    // Optimize for passthrough modes
-    if (flashMethod === 'ardupilot_passthrough' || flashMethod === 'inav_passthrough') {
-        // sm.log("Passthrough Mode: Optimizing block sizes for stub and flash (4KB).");
-        
-        // Reduce RAM block size for stub upload (Default is 0x1800 / 6KB)
-        //esploader.ESP_RAM_BLOCK = 4096;
-        
-        // Reduce write block size for flash (Default is 0x4000 / 16KB)
-        //esploader.FLASH_WRITE_SIZE = 8192; 
-        
-        // sm.log(`Passthrough Mode: ESP_RAM_BLOCK=${esploader.ESP_RAM_BLOCK}, FLASH_WRITE_SIZE=${esploader.FLASH_WRITE_SIZE}`);
-    }
 
     chipName = await esploader.main(resetMode);
     

@@ -197,11 +197,14 @@ function FirmwareFlasherPanel({
     }
   }, [flashMethod, selectedPort]);
 
+  const mspScanActiveRef = useRef(false);
+
   const scanMspPorts = useCallback(async () => {
     if (!selectedPort) return;
     
-    // prevent overlapping scans
-    if (isScanningMsp) return;
+    // prevent overlapping scans (ref avoids stale closure)
+    if (mspScanActiveRef.current) return;
+    mspScanActiveRef.current = true;
 
     setIsScanningMsp(true);
     setMspPorts([]); // clear previous results while scanning
@@ -231,6 +234,7 @@ function FirmwareFlasherPanel({
     } catch (e: any) {
         console.error("Port lookup failed:", e);
     } finally {
+        mspScanActiveRef.current = false;
         setIsScanningMsp(false);
     }
   }, [selectedPort]);

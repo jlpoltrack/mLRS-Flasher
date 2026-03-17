@@ -123,18 +123,12 @@ export class InavPassthroughService {
 
         if (sendReboot) {
             this.log("Sending MSP Reboot command to Rx...");
-            try {
-                // Magic number 1234321 = 0x0012D591 (Little Endian: 91 D5 12 00)
-                const payload = [0x91, 0xD5, 0x12, 0x00];
-                await this.msp.sendCommand(MSP_REBOOT, payload);
-                this.log("MSP Reboot ACK received...");
-            } catch (e: any) {
-                // For reboot command, a timeout is often expected as the device reboots immediately
-                // preventing it from sending an ACK.
-                this.log(`Rx reboot command sent (no ACK received, proceeding). Error: ${e.message}`);
-            }
+            // magic number 1234321 = 0x0012D591 (little endian: 91 D5 12 00)
+            const payload = [0x91, 0xD5, 0x12, 0x00];
+            await this.msp.sendCommand(MSP_REBOOT, payload);
+            this.log("MSP Reboot ACK received.");
 
-            // Wait for reboot to complete
+            // wait for reboot to complete
             this.log(`Waiting ${REBOOT_WAIT_MS}ms for receiver to reboot...`);
             await new Promise(r => setTimeout(r, REBOOT_WAIT_MS));
         }
