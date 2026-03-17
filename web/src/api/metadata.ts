@@ -33,6 +33,7 @@ const description_stm32_stlink_default = "Flash method: STLink\n  - connect SWD 
 const description_stm32_uart_default = "Flash method: UART\n  - connect Tx,Rx pads to USB-TTL adapter\n  - select COM port\n  - power up receiver while pressing the button\n";
 const description_esp_esptool_uart_default = "Flash method: esptool\n  - connect Tx,Rx pads to USB-TTL adapter\n  - select COM port\n  - power up receiver while pressing the button\n";
 const description_ardupilot_passthrough_default = "In addition flashing via ArduPilot passthrough is supported:\n  - follow the instructions in the console\n";
+const description_radio_passthru_default = "  - with radio powered up, connect to USB of your radio\n  - select 'USB Serial (VCP)'\n";
 
 export const g_targetDict: Record<string, any> = {
     'tx-matek' : {
@@ -68,27 +69,30 @@ export const g_targetDict: Record<string, any> = {
         'tx-radiomaster-bandit' : {
             'description' : "Flash method: connect to USB (select COM port)\n" +
                 "\nWireless bridge: ESP8285\n" +
-                "For flashing the wireless bridge: \n" +
-                "  - set 'Tx Ser Dest' to serial2\n" +
-                "  - set 'Tx Ser Baudrate' to 115200\n" +
+                "For flashing the wireless bridge, ensure the following settings are stored:\n" +
+                "  - 'Tx Ser Dest' = serial2\n" +
+                "  - 'Tx Ser Baudrate' = 115200\n" +
+                "IMPORTANT: If using Windows - click 'Flash Wireless Bridge' first and wait for the module to reboot before the next step.\n" +
                 "  - put Tx module into FLASH_ESP mode via OLED Actions page\n",
             'wireless' : { 'chipset' : 'esp8266', 'reset' : 'no dtr', 'baud' : 115200 },
         },
         'tx-radiomaster-nomad' : {
             'description' : "Flash method: connect to USB (select COM port)\n" +
                 "\nWireless bridge: ESP32C3\n" +
-                "For flashing the wireless bridge: \n" +
-                "  - set 'Tx Ser Dest' to serial2\n" +
-                "  - set 'Tx Ser Baudrate' to 115200\n" +
+                "For flashing the wireless bridge, ensure the following settings are stored:\n" +
+                "  - 'Tx Ser Dest' = serial2\n" +
+                "  - 'Tx Ser Baudrate' = 115200\n" +
+                "IMPORTANT: If using Windows - click 'Flash Wireless Bridge' first and wait for the module to reboot before the next step.\n" +
                 "  - put Tx module into FLASH_ESP by holding button located under the 'T' in RadioMaster for 4 seconds\n",
             'wireless' : { 'chipset' : 'esp32c3', 'reset' : 'no dtr', 'baud' : 115200, 'erase' : 'full_erase' },
         },
         'tx-radiomaster-ranger' : {
             'description' : "Flash method: connect to USB (select COM port)\n" +
                 "\nWireless bridge: ESP8285\n" +
-                "For flashing the wireless bridge: \n" +
-                "  - set 'Tx Ser Dest' to serial2\n" +
-                "  - set 'Tx Ser Baudrate' to 115200\n" +
+                "For flashing the wireless bridge, ensure the following settings are stored:\n" +
+                "  - 'Tx Ser Dest' = serial2\n" +
+                "  - 'Tx Ser Baudrate' = 115200\n" +
+                "IMPORTANT: If using Windows - click 'Flash Wireless Bridge' first and wait for the module to reboot before the next step.\n" +
                 "  - put Tx module into FLASH_ESP mode via OLED Actions page\n",
             'wireless' : { 'chipset' : 'esp8266', 'reset' : 'no dtr', 'baud' : 115200 },
         },
@@ -97,32 +101,33 @@ export const g_targetDict: Record<string, any> = {
         },
     },
     'tx-jumper-internal' : {
-        'description' : "Supported radios: T20 V2, T15, T14, T-Pro S\nFlash method: radio passthrough\n  - with radio powered up, connect to USB of your radio\n  - select 'USB Serial (VCP)'\n" +
-            "\nWireless bridge: ESP8285\nFor flashing the wireless bridge:\n  - with radio powered up, connect to USB of your radio\n  - select 'USB Serial (VCP)'\n",
+        'description' : "Supported radios: T20 V2, T15, T14, T-Pro S\nFlash method: radio passthrough\n" + description_radio_passthru_default +
+        
+            "\nWireless bridge: ESP8285\nFor flashing the wireless bridge:\n" + description_radio_passthru_default,
         'wireless' : { 'chipset' : 'esp8266', 'baud' : 115200 },
     },
     'tx-radiomaster-internal' : {
-        'description' : "Supported radios: TX16S, TX12, MT12, Zorro, Pocket, Boxer\nFlash method: radio passthrough\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n" +
-            "\nWireless bridge: ESP8285\nFor flashing the wireless bridge:\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n",
+        'description' : "Supported radios: TX16S, TX12, MT12, Zorro, Pocket, Boxer\nFlash method: radio passthrough\n" + description_radio_passthru_default +
+            "\nWireless bridge: ESP8285\nFor flashing the wireless bridge:\n" + description_radio_passthru_default,
         'wireless' : { 'chipset' : 'esp8266', 'baud' : 115200 },
         'tx-radiomaster-internal-2400' : {
         },
         'tx-radiomaster-internal-boxer' : {
         },
         'tx-radiomaster-internal-tx15' : {
-            'description' : "Supported radios: TX15\nFlash method: radio passthrough\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n" +
-                "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n",
+            'description' : "Supported radios: TX15\nFlash method: radio passthrough\n" + description_radio_passthru_default +
+                "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n" + description_radio_passthru_default,
             'wireless' : { 'chipset' : 'esp32c3', 'baud' : 115200, 'erase' : 'full_erase' },
         },
         'tx-radiomaster-internal-gx12' : {
-            'description' : "Supported radios: GX12\nFlash method: radio passthrough\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n" +
-                "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n  - connect to USB of your radio and select 'USB Serial (VCP)'\n",
+            'description' : "Supported radios: GX12\nFlash method: radio passthrough\n" + description_radio_passthru_default +
+                "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n" + description_radio_passthru_default,
             'wireless' : { 'chipset' : 'esp32c3', 'baud' : 115200, 'erase' : 'full_erase' },
         },
     },
     'tx-flysky-internal' : {
-        'description' : "Supported radios: PA01\nFlash method: radio passthrough\n  - with radio powered up, connect to USB of your radio\n  - select 'USB Serial (VCP)'\n" +
-            "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n  - with radio powered up, connect to USB of your radio\n  - select 'USB Serial (VCP)'\n",
+        'description' : "Supported radios: PA01\nFlash method: radio passthrough\n" + description_radio_passthru_default +
+            "\nWireless bridge: ESP32C3\nFor flashing the wireless bridge:\n" + description_radio_passthru_default,
         'wireless' : { 'chipset' : 'esp32c3', 'baud' : 115200, 'erase' : 'full_erase' },
     },
     'rx-matek' : {

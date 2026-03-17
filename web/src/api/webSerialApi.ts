@@ -1,5 +1,5 @@
 // web serial api - orchestration layer for flashing and downloads
-// 2026-01-19
+// 2026-03-17
 
 import { githubApi } from './githubApi';
 import { flash } from './flasher';
@@ -26,7 +26,7 @@ export const api = {
     return { devices };
   },
   
-  listFirmware: async (options: { type: string, device?: string, version: string }) => {
+  listFirmware: async (options: { type: string, device?: string, version: string, luaFolder?: string }) => {
     return githubApi.listFirmware(options);
   },
   
@@ -122,17 +122,31 @@ export const api = {
     reset?: string,
     url?: string,
     erase?: string,
-    activationBaud?: number
+    activationBaud?: number,
+    chipset?: string
   }): Promise<void> => { 
     const { type, device, filename } = options;
-    const metadata = await githubApi.getMetadata({ type, device, filename });
 
-    if (!metadata) {
-      throw new Error(`Device not found in database: ${device}`);
+    // in local file mode (firmwareData provided), infer chipset from flash method
+    // instead of fetching metadata for a possibly stale device selection
+    let chipset: string;
+    let metadata: any = null;
+    if (options.firmwareData) {
+      // use explicit chipset if provided (e.g. local file mode with mcu selector)
+      if (options.chipset) {
+        chipset = options.chipset;
+      } else {
+        chipset = options.flashMethod === 'esptool' ? 'esp32' : 'stm32';
+      }
+    } else {
+      metadata = await githubApi.getMetadata({ type, device, filename });
+      if (!metadata) {
+        throw new Error(`Device not found in database: ${device}`);
+      }
+      chipset = (metadata.chipset as string) || 'stm32';
     }
 
-    const chipset = (metadata.chipset as string) || 'stm32';
-    const flashmethod = options.flashMethod || (metadata.raw_flashmethod as string) || '';
+    const flashmethod = options.flashMethod || (metadata?.raw_flashmethod as string) || '';
     
     const flasherOptions: FlasherOptions = {
       chipset,
@@ -146,13 +160,14 @@ export const api = {
       filename: options.filename,
       reset: options.reset,
       baud: options.baudrate,
-      erase: options.erase || (metadata.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata.erase),
+      erase: options.erase || (metadata?.isWirelessBridgeFirmware ? metadata.wireless?.erase : metadata?.erase),
       device: options.device,
       flashMethod: options.flashMethod,
       passthroughSerial: options.passthroughSerial,
       passthroughIdentifier: options.passthroughIdentifier,
       activationBaud: options.activationBaud,
-      isWirelessBridge: !!metadata.isWirelessBridgeFirmware
+      isWirelessBridge: !!metadata?.isWirelessBridgeFirmware,
+      isLocalFile: !!options.firmwareData
     };
 
     // fetch firmware data if not provided
@@ -204,8 +219,10 @@ export const api = {
     }
   },
   
+  // TODO: implement flash cancellation for web version (e.g. abort the serial write loop)
   cancelPython: async (): Promise<void> => { 
-    // cancel functionality not implemented for web version
+    console.warn('cancel requested but not yet implemented in web version');
+    outputCallback?.({ type: 'info', message: 'Cancel is not yet supported in the web version.' });
   },
   
   onOutput: (callback: (data: any) => void) => {

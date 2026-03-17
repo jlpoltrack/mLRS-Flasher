@@ -24,6 +24,7 @@ function App() {
   const [flashTarget, setFlashTarget] = useState<BackendTarget | null>(null);
   const [progress, setProgress] = useState(0);
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; releaseUrl: string; updateAvailable: boolean } | null>(null);
+  const [useLocalFile, setUseLocalFile] = useState(false);
 
   const hasLoaded = useRef(false);
 
@@ -178,6 +179,7 @@ function App() {
                   isFlashing={isFlashing}
                   flashTarget={flashTarget}
                   progress={progress}
+                  useLocalFile={useLocalFile}
                 />
               );
             case TargetType.Receiver:
@@ -191,6 +193,7 @@ function App() {
                   isFlashing={isFlashing}
                   flashTarget={flashTarget}
                   progress={progress}
+                  useLocalFile={useLocalFile}
                 />
               );
             case TargetType.TxInternal:
@@ -204,6 +207,7 @@ function App() {
                   isFlashing={isFlashing}
                   flashTarget={flashTarget}
                   progress={progress}
+                  useLocalFile={useLocalFile}
                 />
               );
             case 'lua':
@@ -222,7 +226,7 @@ function App() {
 
   return (
     <div className="app">
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} useLocalFile={useLocalFile} onLocalFileToggle={setUseLocalFile} />
       <div className="main-content">
         {updateInfo && (
           <UpdateBanner 
