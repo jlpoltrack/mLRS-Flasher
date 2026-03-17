@@ -11,7 +11,7 @@ export const MSP2_COMMON_SERIAL_CONFIG = 0x1009;
 export const MSP_REBOOT = 68;
 
 
-// Serial Port Functions (Bitmask)
+// serial port functions (bitmask)
 export const FUNCTION_MSP = (1 << 0);
 export const FUNCTION_GPS = (1 << 1);
 export const FUNCTION_RX_SERIAL = (1 << 6);
@@ -97,7 +97,7 @@ export class MspV2Protocol {
         const headerStr = await this.waitForHeader();
         const frameHeader = await this.serial.read(5, 3000); // flag, func(2), size(2)
         const respFlag = frameHeader[0];
-        // Little endian size
+        // little endian size
         const respSize = frameHeader[3] | (frameHeader[4] << 8);
 
         if (headerStr === '$X!') {

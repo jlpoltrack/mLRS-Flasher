@@ -1,14 +1,9 @@
 import { MavLinkPacketSplitter, MavLinkPacketParser, MavLinkData, MavLinkProtocolV2, minimal, common } from 'node-mavlink';
 import type { MavLinkPacket } from 'node-mavlink';
+
 const REBOOT_WAIT_MS = 2000;
 
-// ------------------------------------
-// Message Definitions
-// ------------------------------------
-
-// ------------------------------------
-// Constants
-// ------------------------------------
+// constants
 const MAV_AUTOPILOT_ARDUPILOTMEGA = 3;
 const MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246;
 
@@ -16,19 +11,17 @@ const MLRS_SYS_ID = 51;
 const MLRS_COMP_ID = 68;
 const MLRS_MAGIC_NUMBER = 1234321;
 
-// Communication Settings
+// communication settings
 const PARAM_READ_TIMEOUT_MS = 500;
 const PARAM_READ_RETRIES = 2;
 
-// Registry of all known messages
+// registry of all known messages
 const REGISTRY: any = {
     ...minimal.REGISTRY,
     ...common.REGISTRY,
 };
 
-// ------------------------------------
-// MAVLink Connection Handler
-// ------------------------------------
+// MAVLink connection handler
 
 class MavLinkConnection {
     private port: SerialPort;
@@ -38,14 +31,13 @@ class MavLinkConnection {
     // node-mavlink helpers
     private splitter = new MavLinkPacketSplitter();
     private parser = new MavLinkPacketParser();
-
     private onLog?: (msg: string) => void;
 
-    // System ID for this GCS
+    // system ID for this GCS
     private mySysId = 255;
     private myCompId = 0; // 0 for GCS
 
-    // Target (auto-detected from Heartbeat)
+    // target (auto-detected from heartbeat)
     public targetSysId = 1;
     public targetCompId = 1;
 
@@ -53,7 +45,7 @@ class MavLinkConnection {
     private readLoopActive = false;
     private readLoopPromise: Promise<void> | null = null;
 
-    // Packet queue (like Python's approach) - all received packets go here
+    // packet queue - all received packets go here
     private packetQueue: MavLinkPacket[] = [];
 
     constructor(port: SerialPort, onLog?: (msg: string) => void) {
@@ -65,18 +57,18 @@ class MavLinkConnection {
         try {
             await this.port.open({ baudRate });
         } catch (e: any) {
-            // Port might already be open - check if it's usable
+            // port might already be open - check if it's usable
             if (!e?.message?.includes('already open')) {
                 throw e;
             }
         }
 
-        // Create fresh splitter/parser to avoid corrupted state from previous connections
+        // create fresh splitter/parser to avoid corrupted state from previous connections
         this.splitter = new MavLinkPacketSplitter();
         this.parser = new MavLinkPacketParser();
         this.packetQueue = [];
 
-        // Wire up pipeline (must be done after creating fresh splitter/parser)
+        // wire up pipeline (must be done after creating fresh splitter/parser)
         this.initPipeline();
 
         if (this.port.readable && this.port.writable) {
@@ -99,14 +91,14 @@ class MavLinkConnection {
     async disconnect() {
         this.readLoopActive = false;
 
-        // 1. Cancel Reader (unblocks reader.read())
+        // 1. cancel reader (unblocks reader.read())
         if (this.reader) {
             try {
                 await this.reader.cancel();
             } catch { }
         }
 
-        // 2. Wait for read loop to finish (with timeout)
+        // 2. wait for read loop to finish (with timeout)
         if (this.readLoopPromise) {
             try {
                 await Promise.race([
@@ -117,7 +109,7 @@ class MavLinkConnection {
             this.readLoopPromise = null;
         }
 
-        // 3. Release Locks
+        // 3. release locks
         if (this.reader) {
             try { this.reader.releaseLock(); } catch { }
             this.reader = null;
@@ -127,7 +119,7 @@ class MavLinkConnection {
             this.writer = null;
         }
 
-        // 4. Close Port
+        // 4. close port
         if (this.port) {
             try {
                 await this.port.close();
@@ -151,37 +143,37 @@ class MavLinkConnection {
                     }
                 }
             } catch {
-                // Ignore errors on close/cancel
+                // ignore errors on close/cancel
             } finally {
                 this.readLoopActive = false;
             }
         })();
     }
 
-    // Hook up pipeline
+    // hook up pipeline
     initPipeline() {
-        // wiring: splitter -> parser -> packetListeners
+        // wiring: splitter -> parser -> packet listeners
         this.splitter.on('data', (data: Uint8Array) => {
             this.parser.write(data);
         });
 
         this.parser.on('data', (packet: MavLinkPacket) => {
-            // Deserialization: Convert raw bytes to typed objects
+            // deserialization: convert raw bytes to typed objects
             const clazz = REGISTRY[packet.header.msgid];
             if (clazz && packet.protocol) {
                 (packet as any).payload = packet.protocol.data(packet.payload, clazz);
             }
 
-            // Push to queue (like Python's recv_match approach)
+            // push to queue
             this.packetQueue.push(packet);
         });
     }
 
-    // New: Standard send using node-mavlink
+    // send MAVLink message
     async send(msg: MavLinkData) {
         if (!this.writer) return;
 
-        // Use MavLinkProtocolV2 to serialize
+        // use MavLinkProtocolV2 to serialize
         const protocol = new MavLinkProtocolV2(this.mySysId, this.myCompId);
         const buffer = protocol.serialize(msg, this.seq);
         
@@ -189,34 +181,34 @@ class MavLinkConnection {
         this.seq = (this.seq + 1) % 256;
     }
 
-    // Poll packet queue for matching packet (like Python's mav_recv_match)
+    // poll packet queue for matching packet
     async waitForPacket(msgId: number, timeoutMs = 2000, predicate?: (p: MavLinkPacket) => boolean): Promise<MavLinkPacket | null> {
         const startTime = Date.now();
 
         while (Date.now() - startTime < timeoutMs) {
-            // Exit early if connection is dead
+            // exit early if connection is dead
             if (!this.readLoopActive) return null;
 
-            // Check queue for matching packet
+            // check queue for matching packet
             for (let i = 0; i < this.packetQueue.length; i++) {
                 const packet = this.packetQueue[i];
                 if (packet.header.msgid === msgId) {
                     if (predicate && !predicate(packet)) continue;
 
-                    // Found it - remove from queue and return
+                    // found it - remove from queue and return
                     this.packetQueue.splice(i, 1);
                     return packet;
                 }
             }
 
-            // Sleep 10ms then check again (like Python's time.sleep(0.01))
+            // sleep 10ms then check again
             await new Promise(r => setTimeout(r, 10));
         }
 
         return null;
     }
 
-    // Helpers
+    // helpers
     async waitForHeartbeat(timeoutMs = 10000): Promise<boolean> {
         this.onLog?.("wait for heartbeat...");
         const packet = await this.waitForPacket(0, timeoutMs); // 0 = HEARTBEAT
@@ -243,14 +235,14 @@ class MavLinkConnection {
 
             await this.send(msg);
 
-            // Poll queue for PARAM_VALUE (like Python's mav_recv_match)
+            // poll queue for PARAM_VALUE
             const pkt = await this.waitForPacket(22, timeoutMs);
             if (pkt) {
                 const payload = pkt.payload as any;
                 return payload.paramValue;
             }
 
-            // Timeout - retry if attempts remain
+            // timeout - retry if attempts remain
             if (attempt <= retries) {
                 this.onLog?.(`paramRead '${paramId}' timeout, retrying (${attempt}/${retries})...`);
             }
@@ -269,11 +261,11 @@ class MavLinkConnection {
         (msg as any).paramType = 0;
 
         await this.send(msg);
-        // Wait for confirmation (poll queue)
+        // wait for confirmation (poll queue)
         await this.waitForPacket(22, 500); // 22 = PARAM_VALUE
     }
 
-    // Poll for COMMAND_ACK with matching command and magic number
+    // poll for COMMAND_ACK with matching command and magic number
     async waitForMwAck(expectedCmd: number, magic: number, timeoutMs = 2000): Promise<boolean> {
         const pkt = await this.waitForPacket(77, timeoutMs, (packet) => {
             const payload = packet.payload as any;
@@ -284,7 +276,7 @@ class MavLinkConnection {
 
     async commandLong(cmd: number, p1=0, p2=0, p3=0, p4=0, p5=0, p6=0, p7=0, targetSys?: number, targetComp?: number, confirmation=0) {
         const msg = new common.CommandLong();
-        // Helper to set params to avoid excessive TS ignores
+        // helper to set params to avoid excessive TS ignores
         const setParams = (m: any) => {
              m._param1 = p1; m._param2 = p2; m._param3 = p3; m._param4 = p4;
              m._param5 = p5; m._param6 = p6; m._param7 = p7;
@@ -300,20 +292,18 @@ class MavLinkConnection {
     }
 }
 
-// ------------------------------------
-// ArduPilot Passthrough Service (Port Scanning)
-// ------------------------------------
+// ArduPilot passthrough service (port scanning)
 
 export interface ArduPilotSerialPort {
     index: number;        // 1-8 (SERIAL number)
     name: string;         // "SERIAL2 (MAVLink2, 57600)"
     protocol: number;     // 1=MAVLink1, 2=MAVLink2, 28=Scripting
-    baudRate: number;     // Actual baud rate
+    baudRate: number;     // actual baud rate
 }
 
 const FC_SETTLE_TIME_MS = 500;
 
-// Baud rate lookup table (ArduPilot SERIAL_BAUD values)
+// baud rate lookup table (ArduPilot SERIAL_BAUD values)
 const BAUD_LOOKUP: Record<number, number> = {
     1: 1200,
     2: 2400,
@@ -345,7 +335,7 @@ export class ArduPilotPassthroughService {
         try {
             await this.mav.connect(57600);
             const got = await this.mav.waitForHeartbeat(5000);
-            if (got) await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
+            if (got) await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // let FC settle
             return got;
         } catch (e) {
             this.onLog?.(`ArduPilot connect error: ${e}`);
@@ -357,14 +347,14 @@ export class ArduPilotPassthroughService {
         try {
             await this.mav.disconnect();
         } catch (e) {
-            // Ignore disconnect errors
+            // ignore disconnect errors
         }
     }
 
     async getMavLinkPorts(onProgress?: (msg: string) => void): Promise<ArduPilotSerialPort[]> {
         const result: ArduPilotSerialPort[] = [];
 
-        // Scan SERIAL1 through SERIAL8
+        // scan SERIAL1 through SERIAL8
         for (let i = 1; i <= 8; i++) {
             onProgress?.(`Scanning SERIAL${i}...`);
             const protocolParam = `SERIAL${i}_PROTOCOL`;
@@ -372,13 +362,13 @@ export class ArduPilotPassthroughService {
 
             let protocol: number;
             try {
-                // User Spec: Common timeout/retry for scanning
+                // common timeout/retry for scanning
                 protocol = await this.mav.paramRead(protocolParam, PARAM_READ_TIMEOUT_MS, PARAM_READ_RETRIES);
             } catch {
                 continue;
             }
 
-            // Filter to MAVLink-compatible protocols: 1=MAVLink1, 2=MAVLink2, 28=Scripting
+            // filter to MAVLink-compatible protocols: 1=MAVLink1, 2=MAVLink2, 28=Scripting
             if (protocol !== 1 && protocol !== 2 && protocol !== 28) continue;
 
             let baudRate = 57600;
@@ -404,9 +394,7 @@ export class ArduPilotPassthroughService {
     }
 }
 
-// ------------------------------------
-// Public API
-// ------------------------------------
+// public API
 
 export async function initArduPilotPassthrough(
     port: SerialPort,
@@ -415,13 +403,13 @@ export async function initArduPilotPassthrough(
     onLog?: (msg: string) => void
 ): Promise<{ port: SerialPort, baudRate: number }> {
     
-    // Parse target SERIAL index
+    // parse target SERIAL index
     const match = passthroughSerialStr.match(/SERIAL(\d+)/i);
     let serialIndex = 2; // default
     if (match) serialIndex = parseInt(match[1]);
     const pProtocolName = `SERIAL${serialIndex}_PROTOCOL`;
 
-    // For ESP reconnection flow
+    // for ESP reconnection flow
     const info = port.getInfo();
     const targetVid = info.usbVendorId;
     const targetPid = info.usbProductId;
@@ -430,7 +418,7 @@ export async function initArduPilotPassthrough(
     onLog?.(`ArduPilot Passthrough - ${passthroughSerialStr}`);
     onLog?.("------------------------------------------------------------");
 
-    // Connect to the port (already verified by autoscan)
+    // connect to the port (already verified by autoscan)
     let mav: MavLinkConnection | null = new MavLinkConnection(port, onLog);
     let activePort = port;
 
@@ -444,20 +432,17 @@ export async function initArduPilotPassthrough(
             );
         }
         onLog?.("Heartbeat detected!");
-        await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
+        await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // let FC settle
 
-        // ---------------------------------------------------------
-        // 2. Initial Setup Checks
-        // ---------------------------------------------------------
+        // initial setup checks
         
-        // We have a live connection 'mav'. 
-        // Perform parameter checks.
+        // perform parameter checks
         
         const pBaudName = `SERIAL${serialIndex}_BAUD`;
         const protocol = await mav.paramRead(pProtocolName);
         const baudVal = await mav.paramRead(pBaudName);
 
-        // Strict Mode validation
+        // strict mode validation
         if (protocol !== 2 && protocol !== 28) {
              throw new Error(`Invalid ${pProtocolName}=${protocol}. Must be 2 (MAVLink2) or 28 (Scripting).`);
         }
@@ -470,18 +455,16 @@ export async function initArduPilotPassthrough(
             await mav.disconnect();
             await new Promise(r => setTimeout(r, 500));
             await mav.connect(receiverBaud);
-            // Quick verify
+            // quick verify
             if (!await mav.waitForHeartbeat(5000)) {
                  throw new Error(`Failed to reconnect at ${receiverBaud}.`);
             }
-            await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // Let FC settle
+            await new Promise(r => setTimeout(r, FC_SETTLE_TIME_MS)); // let FC settle
         }
 
-        // ---------------------------------------------------------
-        // 3. ESP Workflow
-        // ---------------------------------------------------------
+        // ESP workflow
         if (isEsp) {
-            // Assume we always need to force bootloader mode for ESP
+            // assume we always need to force bootloader mode for ESP
             if (protocol !== 28) {
                  onLog?.(`ESP: Setting ${pProtocolName} -> 28 (Scripting)...`);
                  try { await mav.paramSet(pProtocolName, 28); } catch(e) {}
@@ -496,14 +479,14 @@ export async function initArduPilotPassthrough(
                  await mav.disconnect();
 
                  onLog?.("Please disconnect the flight controller within 60 seconds...");
-                 // Wait for physical unplug (with 60s timeout)
+                 // wait for physical unplug (with 60s timeout)
                  const disconnectStart = Date.now();
                  let disconnected = false;
                  while (Date.now() - disconnectStart < 60000) {
                      try {
                          await activePort.open({ baudRate: 57600 });
                          await activePort.close();
-                         // If open worked, device is still here.
+                         // if open worked, device is still here.
                          await new Promise(r => setTimeout(r, 500));
                      } catch (e) {
                          onLog?.("Flight controller disconnected.");
@@ -522,9 +505,9 @@ export async function initArduPilotPassthrough(
                  let reconnectedPort: any = null;
                  const startTime = Date.now();
 
-                 // 60s Reconnect Loop
+                 // 60s reconnect loop
                  while (Date.now() - startTime < 60000) {
-                     // Refresh candidates
+                     // refresh candidates
                      const allPorts = await (navigator.serial as any).getPorts();
                      const freshCandidates = allPorts.filter((p: any) => {
                          const i = p.getInfo();
@@ -536,7 +519,7 @@ export async function initArduPilotPassthrough(
                          const m = new MavLinkConnection(p, onLog);
                          try {
                              await m.connect(57600);
-                             // Quick check 2s
+                             // quick check 2s
                              if (await m.waitForHeartbeat(2000)) {
                                  onLog?.(`[Candidate ${i+1}] Reconnected & Active!`);
                                  reconnectedMav = m;
@@ -557,45 +540,43 @@ export async function initArduPilotPassthrough(
                  mav = reconnectedMav;
                  activePort = reconnectedPort;
                  
-                 // Restore Passthrough
-                 onLog?.("Restoring Passthrough...");
-                 await new Promise(r => setTimeout(r, 500)); // Boot settle
+                 // restore passthrough
+                 onLog?.("Restoring passthrough...");
+                 await new Promise(r => setTimeout(r, 500)); // boot settle
                  await mav.paramSet(pProtocolName, 2);
                  await mav.paramSet("SERIAL_PASSTIMO", 0);
                  await mav.paramSet("SERIAL_PASS2", serialIndex);
                  await new Promise(r => setTimeout(r, 500));
             } else {
-                 // Already in 28. Ensure passthrough.
-                 onLog?.("ESP in Scripting Mode. Resetting to Passthrough...");
+                 // already in 28 - ensure passthrough
+                 onLog?.("ESP in Scripting mode. Resetting to passthrough...");
                  await mav.paramSet(pProtocolName, 2);
                  await mav.paramSet("SERIAL_PASSTIMO", 0);
                  await mav.paramSet("SERIAL_PASS2", serialIndex);
                  await new Promise(r => setTimeout(r, 500));
             }
             
-            onLog?.("ESP Ready for Flashing.");
+            onLog?.("ESP ready for flashing.");
             // mav will be disconnected in finally
             await new Promise(r => setTimeout(r, 500));
             return { port: activePort, baudRate: receiverBaud };
             
         } else {
             // STM32
-            onLog?.("Activating Passthrough...");
+            onLog?.("Activating passthrough...");
             await mav.paramSet(pProtocolName, 2);
             await mav.paramSet("SERIAL_PASSTIMO", 0);
             await mav.paramSet("SERIAL_PASS2", serialIndex);
             await new Promise(r => setTimeout(r, 500));
         }
 
-        // ---------------------------------------------------------
-        // Post-Setup (Bootloader Trigger) - mlrs_put_into_systemboot
-        // ---------------------------------------------------------
+        // post-setup (bootloader trigger) - mlrs_put_into_systemboot
  
 
         onLog?.("check connection to mLRS receiver...");
-        // Step 1: Probe/Ping (Conf=0, Action=0)
+        // step 1: probe/ping (Conf=0, Action=0)
         let ack = false;
-        // Try 3 times (reduced from 5 to save time if ACKs are missing)
+        // try 3 times (reduced from 5 to save time if ACKs are missing)
         for (let i = 0; i < 3; i++) {
              const ackPromise = mav.waitForMwAck(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, MLRS_MAGIC_NUMBER, 500);
              await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 0, 0, 0, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 0);
@@ -611,7 +592,7 @@ export async function initArduPilotPassthrough(
              onLog?.("mLRS receiver connected");
         }
 
-        // Step 2: Arm (Conf=1, Action=3)
+        // step 2: arm (Conf=1, Action=3)
         onLog?.("arm mLRS receiver for reboot shutdown...");
         ack = false;
         for (let i = 0; i < 3; i++) {
@@ -621,12 +602,12 @@ export async function initArduPilotPassthrough(
                  ack = true;
                  break;
              }
-             // onLog?.("Retry Arm..."); 
+
         }
         if (!ack) onLog?.("No response to arm command. Proceeding...");
         else onLog?.("mLRS receiver armed for reboot shutdown");
 
-        // Step 3: Execute (Conf=2, Action=3)
+        // step 3: execute (Conf=2, Action=3)
         onLog?.("mLRS receiver reboot shutdown...");
         await mav.commandLong(MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 2, 0, 3, MLRS_COMP_ID, 0, 0, MLRS_MAGIC_NUMBER, MLRS_SYS_ID, MLRS_COMP_ID, 2);
         

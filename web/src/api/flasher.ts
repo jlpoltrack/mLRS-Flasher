@@ -1,4 +1,4 @@
-// 2026-01-19
+// 2026-03-17
 import { ESPLoader, Transport, type Before } from 'esptool-js';
 import { DFU, DFUse } from 'webdfu';
 

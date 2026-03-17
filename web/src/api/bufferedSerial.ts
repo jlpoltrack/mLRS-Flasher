@@ -21,7 +21,7 @@ export class BufferedSerial {
         this.rxBuffer = [];
         this.reading = false;
 
-        // Force cleanup if already open
+        // force cleanup if already open
         if (this.port.readable || this.port.writable) {
             await this.close();
         }
@@ -58,7 +58,7 @@ export class BufferedSerial {
         await this.disconnect();
         try {
             await this.port.close();
-            // Allow OS time to release resource
+            // allow OS time to release resource
             await new Promise(r => setTimeout(r, 100));
         } catch (e: any) {
             this.log(`Port close error: ${e?.message || e}`);
@@ -130,14 +130,14 @@ export class BufferedSerial {
     }
     
     /**
-     * Non-blocking check for available bytes
+     * non-blocking check for available bytes
      */
     get bytesAvailable(): number {
         return this.rxBuffer.length;
     }
     
     /**
-     * Clear the receive buffer
+     * clear the receive buffer
      */
     flush() {
         this.rxBuffer = [];
