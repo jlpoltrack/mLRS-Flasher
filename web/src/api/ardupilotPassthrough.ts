@@ -570,8 +570,6 @@ export async function initArduPilotPassthrough(
             await new Promise(r => setTimeout(r, 500));
         }
 
-        // post-setup (bootloader trigger) - mlrs_put_into_systemboot
- 
 
         onLog?.("check connection to mLRS receiver...");
         // step 1: probe/ping (Conf=0, Action=0)
